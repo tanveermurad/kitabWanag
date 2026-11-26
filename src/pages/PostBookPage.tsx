@@ -1,4 +1,4 @@
-import { LocateFixed, Upload } from 'lucide-react';
+import { BookOpen, LocateFixed, Upload } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { LeafletMap } from '../components/LeafletMap';
@@ -49,8 +49,10 @@ export function PostBookPage() {
   const [description, setDescription] = useState('');
   const [coordinates, setCoordinates] = useState<[number, number]>(initialCoords);
   const [presetImageUrl, setPresetImageUrl] = useState(PRESET_COVERS[0].url);
+  const [customImageUrl, setCustomImageUrl] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>(PRESET_COVERS[0].url);
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   const [loadingInitial, setLoadingInitial] = useState(isEditing);
   const [submitting, setSubmitting] = useState(false);
@@ -83,7 +85,11 @@ export function PostBookPage() {
         setDescription(book.description);
         setCoordinates(book.location.coordinates);
         setPresetImageUrl(book.imageUrl);
+        if (/^https:\/\//i.test(book.imageUrl)) {
+          setCustomImageUrl(book.imageUrl);
+        }
         setPreviewUrl(resolveBookImageUrl(book.imageUrl));
+        setPreviewFailed(false);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -119,8 +125,22 @@ export function PostBookPage() {
     }
     setError(null);
     setSelectedFile(file);
+    setCustomImageUrl('');
+    setPreviewFailed(false);
     const objectUrl = URL.createObjectURL(file);
     setPreviewUrl(objectUrl);
+  };
+
+  const handleCustomUrlChange = (value: string) => {
+    setCustomImageUrl(value);
+    setSelectedFile(null);
+    setPreviewFailed(false);
+    const trimmed = value.trim();
+    if (trimmed) {
+      setPreviewUrl(trimmed);
+    } else {
+      setPreviewUrl(presetImageUrl);
+    }
   };
 
   const handleCityChange = (newCity: string) => {
@@ -173,6 +193,8 @@ export function PostBookPage() {
       formData.append('lat', String(coordinates[1]));
       if (selectedFile) {
         formData.append('photo', selectedFile);
+      } else if (customImageUrl.trim()) {
+        formData.append('imageUrl', customImageUrl.trim());
       } else {
         formData.append('imageUrl', presetImageUrl);
       }
@@ -209,24 +231,49 @@ export function PostBookPage() {
         {/* Left: Photo & Preview */}
         <div className="lg:col-span-5 space-y-4">
           <div className="aspect-[3/4] rounded-xl overflow-hidden border border-[#E5DFD3] bg-[#F3EFE6]">
-            <img
-              src={previewUrl}
-              alt="Book cover preview"
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover"
-            />
+            {!previewFailed && previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="Book cover preview"
+                referrerPolicy="no-referrer"
+                onError={() => setPreviewFailed(true)}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-[#5C615D]">
+                <BookOpen className="w-10 h-10 text-[#1B4D3E]/70 mb-2" />
+                <p className="text-xs font-medium">
+                  Cover preview unavailable. Select an editorial cover or paste a valid HTTPS image URL.
+                </p>
+              </div>
+            )}
           </div>
 
-          <label className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold hover:bg-[#F3EFE6] transition-colors cursor-pointer">
-            <Upload className="w-4 h-4" />
-            {selectedFile ? 'Change uploaded photo' : 'Upload book photo'}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={handleFileChange}
-              className="sr-only"
-            />
-          </label>
+          <div className="space-y-2">
+            <label className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold hover:bg-[#F3EFE6] transition-colors cursor-pointer">
+              <Upload className="w-4 h-4" />
+              {selectedFile ? 'Change uploaded photo' : 'Upload book photo'}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleFileChange}
+                className="sr-only"
+              />
+            </label>
+            {selectedFile && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedFile(null);
+                  setPreviewFailed(false);
+                  setPreviewUrl(customImageUrl.trim() || presetImageUrl);
+                }}
+                className="w-full py-1.5 text-xs font-medium text-[#5C615D] hover:text-[#1C1F1D] cursor-pointer"
+              >
+                Clear selected photo ({selectedFile.name})
+              </button>
+            )}
+          </div>
 
           <div className="space-y-2">
             <p className="text-xs font-medium text-[#5C615D]">Or select an editorial cover:</p>
@@ -237,11 +284,13 @@ export function PostBookPage() {
                   type="button"
                   onClick={() => {
                     setSelectedFile(null);
+                    setCustomImageUrl('');
                     setPresetImageUrl(preset.url);
+                    setPreviewFailed(false);
                     setPreviewUrl(preset.url);
                   }}
                   className={`px-2.5 py-2 rounded-lg text-xs font-medium border text-left transition-colors cursor-pointer ${
-                    !selectedFile && presetImageUrl === preset.url
+                    !selectedFile && !customImageUrl.trim() && presetImageUrl === preset.url
                       ? 'border-[#1B4D3E] bg-[#1B4D3E] text-[#FAF7F2]'
                       : 'border-[#E5DFD3] bg-[#FFFFFF] text-[#1C1F1D] hover:bg-[#F3EFE6]'
                   }`}
@@ -250,6 +299,20 @@ export function PostBookPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="customImageUrl" className="block text-xs font-medium text-[#5C615D] mb-1.5">
+              Or paste a cover image URL (https://)
+            </label>
+            <input
+              id="customImageUrl"
+              type="url"
+              value={customImageUrl}
+              onChange={(e) => handleCustomUrlChange(e.target.value)}
+              placeholder="https://res.cloudinary.com/..."
+              className="w-full h-10 px-3 rounded-lg bg-[#FFFFFF] border border-[#E5DFD3] text-xs focus:outline-none focus:border-[#1B4D3E]"
+            />
           </div>
         </div>
 

@@ -145,7 +145,9 @@ export async function saveBookPhoto(file: Express.Multer.File): Promise<string> 
         { folder: 'kitabwanag', resource_type: 'image' },
         (error, result) => {
           if (error || !result?.secure_url) {
-            reject(new HttpError(502, 'Failed to upload image to Cloudinary.'));
+            const detail = error?.message ? ` (${error.message})` : '';
+            console.error('Cloudinary upload failed:', error?.message || 'Unknown Cloudinary error');
+            reject(new HttpError(502, `Failed to upload image to Cloudinary${detail}.`));
             return;
           }
           resolve(result.secure_url);
@@ -153,6 +155,13 @@ export async function saveBookPhoto(file: Express.Multer.File): Promise<string> 
       );
       stream.end(file.buffer);
     });
+  }
+
+  if (IS_SERVERLESS) {
+    throw new HttpError(
+      503,
+      'Photo upload requires a valid CLOUDINARY_URL in environment variables. Please choose an editorial cover or paste an HTTPS cover image URL.',
+    );
   }
 
   ensureUploadDir();

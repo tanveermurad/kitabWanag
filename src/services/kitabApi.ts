@@ -28,7 +28,7 @@ import type {
   RequestStatus,
   UserPublic,
 } from '../types';
-import { apiRequest } from './apiClient';
+import { ApiError, apiRequest } from './apiClient';
 
 export interface BookListFilters {
   type?: string;
@@ -180,10 +180,20 @@ async function resolveCoverImageUrl(formData: FormData): Promise<string> {
       if (uploaded.imageUrl) {
         return clampText(uploaded.imageUrl, 500, '/src/assets/images/book_literary_classic_1795631935232.jpg');
       }
-    } catch {
-      throw new Error(
-        'Photo upload server is unavailable here. Please select one of the editorial book covers or paste a cover image URL.',
-      );
+    } catch (err) {
+      if (
+        err instanceof ApiError &&
+        (err.status === 404 ||
+          err.status === 405 ||
+          err.code === 'NETWORK_ERROR' ||
+          err.code === 'TIMEOUT' ||
+          err.code === 'INVALID_RESPONSE')
+      ) {
+        throw new Error(
+          'Photo upload server is unavailable here. Please select one of the editorial book covers or paste a cover image URL.',
+        );
+      }
+      throw err;
     }
   }
   const rawUrl = clampText(formData.get('imageUrl'), 500);

@@ -1,0 +1,69 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --font-serif: "Playfair Display", Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-cream: #FAF7F2;
+  --color-cream-surface: #F3EFE6;
+  --color-ink: #1C1F1D;
+  --color-ink-muted: #5C615D;
+  --color-pine: #1B4D3E;
+  --color-pine-dark: #143A2F;
+  --color-hairline: #E5DFD3;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: #FAF7F2;
+    color: #1C1F1D;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-serif);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Editorial Leaflet overrides matching KitabWanag palette */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background-color: #EDE8DE;
+}
+
+.leaflet-popup-content-wrapper {
+  background-color: #FAF7F2;
+  color: #1C1F1D;
+  border-radius: 0.75rem;
+  border: 1px solid #E5DFD3;
+  box-shadow: 0 10px 25px -5px rgba(28, 31, 29, 0.12);
+  padding: 0;
+}
+
+.leaflet-popup-content {
+  margin: 0.875rem;
+  line-height: 1.4;
+}
+
+.leaflet-popup-tip {
+  background-color: #FAF7F2;
+}
+
+.kitab-pin-wrapper {
+  background: transparent;
+  border: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

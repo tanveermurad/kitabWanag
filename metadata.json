@@ -1,0 +1,6 @@
+{
+  "name": "KitabWanag",
+  "description": "A neighborhood book exchange, sell, and buy marketplace with interactive OpenStreetMap discovery.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

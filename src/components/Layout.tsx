@@ -1,16 +1,25 @@
-import { BookOpen, Menu, Search, X } from 'lucide-react';
+import { BookOpen, MailCheck, Menu, Search, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { booksApi, resolveBookImageUrl } from '../lib/api';
+import { booksApi, getErrorMessage, resolveBookImageUrl } from '../lib/api';
 import type { BookListing } from '../types';
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user, logout } = useAuth();
+  const {
+    isAuthenticated,
+    emailVerified,
+    user,
+    logout,
+    resendVerificationEmail,
+    refreshVerificationStatus,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyFeedback, setVerifyFeedback] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<BookListing[]>([]);
@@ -96,6 +105,34 @@ export function Layout({ children }: { children: React.ReactNode }) {
     await logout();
     setMobileMenuOpen(false);
     navigate('/');
+  };
+
+  const handleResendVerification = async () => {
+    setVerifyBusy(true);
+    setVerifyFeedback(null);
+    try {
+      await resendVerificationEmail();
+      setVerifyFeedback('Verification link sent. Check your inbox and spam folder.');
+    } catch (err) {
+      setVerifyFeedback(getErrorMessage(err, 'Could not resend verification email.'));
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
+  const handleRefreshVerification = async () => {
+    setVerifyBusy(true);
+    setVerifyFeedback(null);
+    try {
+      const verified = await refreshVerificationStatus();
+      if (!verified) {
+        setVerifyFeedback('Not verified yet. Open the link in your email, then click Check again.');
+      }
+    } catch (err) {
+      setVerifyFeedback(getErrorMessage(err, 'Could not refresh verification status.'));
+    } finally {
+      setVerifyBusy(false);
+    }
   };
 
   return (
@@ -364,6 +401,38 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
       </header>
+
+      {isAuthenticated && !emailVerified && (
+        <div className="bg-[#F3EFE6] border-b border-[#E5DFD3]">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm">
+            <div className="flex items-center gap-2 text-[#1C1F1D]">
+              <MailCheck className="w-4 h-4 text-[#1B4D3E] shrink-0" aria-hidden="true" />
+              <span>
+                Verify <strong>{user?.email}</strong> to post books, send requests, and save profile updates.
+                {verifyFeedback ? ` — ${verifyFeedback}` : ''}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={verifyBusy}
+                onClick={() => void handleResendVerification()}
+                className="px-3 py-1.5 rounded-md border border-[#1B4D3E] text-[#1B4D3E] text-xs font-semibold hover:bg-[#FFFFFF] disabled:opacity-60 cursor-pointer"
+              >
+                Resend email
+              </button>
+              <button
+                type="button"
+                disabled={verifyBusy}
+                onClick={() => void handleRefreshVerification()}
+                className="px-3 py-1.5 rounded-md bg-[#1B4D3E] text-[#FAF7F2] text-xs font-semibold hover:bg-[#143A2F] disabled:opacity-60 cursor-pointer"
+              >
+                I&rsquo;ve verified
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1">{children}</main>
 

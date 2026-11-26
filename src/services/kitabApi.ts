@@ -155,10 +155,10 @@ function docToRequest(id: string, data: Record<string, unknown>): BookRequest {
 function requireVerifiedAuth() {
   const current = auth.currentUser;
   if (!current) {
-    throw new Error('Please sign in with Google to continue.');
+    throw new Error('Please sign in to continue.');
   }
   if (!current.emailVerified) {
-    throw new Error('Please use a verified Google account to perform this action.');
+    throw new Error('Please verify your email address before posting books, sending requests, or leaving reviews.');
   }
   return current;
 }
@@ -172,6 +172,7 @@ async function resolveCoverImageUrl(formData: FormData): Promise<string> {
       const uploaded = await apiRequest<{ imageUrl: string }>('/api/uploads', {
         method: 'POST',
         body: uploadFd,
+        auth: true,
         fallbackMessage: 'Could not upload cover photo.',
       });
       if (uploaded.imageUrl) {
@@ -260,6 +261,7 @@ async function performSyncSignedInUser(
     uid: string;
     displayName: string | null;
     email: string | null;
+    emailVerified?: boolean;
   },
   preferredCity?: string,
 ): Promise<UserPublic> {
@@ -279,6 +281,19 @@ async function performSyncSignedInUser(
   const safeName = clampText(fbUser.displayName, 80, fbUser.email?.split('@')[0] || 'Reader');
   const safeEmail = clampText(fbUser.email, 120);
   const safePreferredCity = preferredCity ? clampText(preferredCity, 60, 'Quetta') : undefined;
+  const isVerified = Boolean(fbUser.emailVerified);
+
+  if (!isVerified) {
+    const existingData = publicSnap.exists() ? publicSnap.data() || {} : {};
+    return {
+      id: uid,
+      name: String(existingData.name || safeName),
+      email: safeEmail,
+      city: String(existingData.city || safePreferredCity || 'Quetta'),
+      createdAt: existingData.createdAt ? tsToIso(existingData.createdAt) : new Date().toISOString(),
+      emailVerified: false,
+    };
+  }
 
   if (!publicSnap.exists()) {
     try {
@@ -341,6 +356,7 @@ async function performSyncSignedInUser(
     email: safeEmail,
     city: String(data.city || safePreferredCity || 'Quetta'),
     createdAt: tsToIso(data.createdAt),
+    emailVerified: true,
   };
 }
 
@@ -350,6 +366,7 @@ export const authApi = {
       uid: string;
       displayName: string | null;
       email: string | null;
+      emailVerified?: boolean;
     },
     preferredCity?: string,
   ): Promise<UserPublic> {
@@ -357,7 +374,7 @@ export const authApi = {
     const existingPromise = inFlightUserSync.get(uid);
     if (existingPromise) {
       const result = await existingPromise;
-      if (preferredCity && result.city !== preferredCity.trim()) {
+      if (fbUser.emailVerified && preferredCity && result.city !== preferredCity.trim()) {
         return authApi.updateCity(preferredCity);
       }
       return result;

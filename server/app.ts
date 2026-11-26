@@ -1,7 +1,5 @@
 import 'dotenv/config';
-import bcrypt from 'bcryptjs';
 import cors from 'cors';
-import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import type { BookCondition, ListingType, RequestStatus } from '../src/types.ts';
@@ -11,10 +9,8 @@ import {
   createBookQuestion,
   createBookReview,
   createRequest,
-  createUser,
   deleteBook,
   findNearbyBooks,
-  findUserByEmail,
   findUserById,
   getBookById,
   getBookDiscussions,
@@ -24,8 +20,6 @@ import {
   listBooksByOwner,
   listIncomingRequests,
   listOutgoingRequests,
-  resetPasswordWithToken,
-  setPasswordResetToken,
   updateBook,
   updateRequestStatus,
 } from './db.ts';
@@ -36,8 +30,8 @@ import {
   HttpError,
   parseCoordinates,
   requireAuth,
+  requireVerifiedAuth,
   sanitizeString,
-  signToken,
 } from './middleware.ts';
 import { saveBookPhoto, UPLOAD_DIR, uploadImageMiddleware, validatePresetImageUrl } from './upload.ts';
 
@@ -76,82 +70,17 @@ function parsePrice(val: unknown, listingType: ListingType): number {
   return Math.round(num);
 }
 
-function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
-  return (
-    allowedOrigins.includes(origin) ||
-    origin.endsWith('.run.app') ||
-    origin.endsWith('.vercel.app')
-  );
-}
-
-function resolveResetBaseUrl(req: express.Request, allowedOrigins: string[]): string {
-  const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
-  if (originHeader && /^https?:\/\//i.test(originHeader) && isOriginAllowed(originHeader, allowedOrigins)) {
-    return originHeader.replace(/\/+$/, '');
-  }
-  const configured = (process.env.FRONTEND_URL || process.env.APP_URL)?.trim();
-  if (configured && /^https?:\/\//i.test(configured)) {
-    return configured.replace(/\/+$/, '');
-  }
-  return 'http://localhost:3000';
-}
-
-async function sendPasswordResetEmail(
-  toEmail: string,
-  userName: string,
-  resetUrl: string,
-): Promise<boolean> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) {
-    return false;
-  }
-  const from = process.env.RESEND_FROM?.trim() || 'KitabWanag <onboarding@resend.dev>';
-  const safeName = escapeHtml(userName);
-  const safeUrl = escapeHtml(resetUrl);
-
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [toEmail],
-      subject: 'Reset your KitabWanag password',
-      text: [
-        `Hello ${userName},`,
-        '',
-        'We received a request to reset your KitabWanag account password.',
-        `Open this link within 15 minutes to choose a new password: ${resetUrl}`,
-        '',
-        'If you did not request a password reset, you can safely ignore this email.',
-      ].join('\n'),
-      html: [
-        `<p>Hello ${safeName},</p>`,
-        '<p>We received a request to reset your KitabWanag account password.</p>',
-        `<p><a href="${safeUrl}" style="display:inline-block;padding:10px 18px;background:#1B4D3E;color:#FAF7F2;text-decoration:none;border-radius:8px;font-weight:600;">Reset Password</a></p>`,
-        `<p style="font-size:13px;color:#5C615D;">Or paste this link into your browser within 15 minutes:<br/>${safeUrl}</p>`,
-        '<p style="font-size:12px;color:#5C615D;">If you did not request a password reset, you can safely ignore this email.</p>',
-      ].join(''),
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    console.error('Resend password reset email error:', response.status, errText);
-    return false;
-  }
-  return true;
+async function resolveAuthenticatedActor(req: AuthenticatedRequest, fallbackCity = 'Quetta') {
+  const authUser = req.user!;
+  const stored = await findUserById(authUser.id);
+  return {
+    id: authUser.id,
+    name: stored?.name || authUser.name || 'Reader',
+    email: authUser.email,
+    city: stored?.city || fallbackCity,
+    emailVerified: authUser.emailVerified,
+    createdAt: stored?.createdAt || new Date().toISOString(),
+  };
 }
 
 export function createApiApp(): express.Express {
@@ -210,146 +139,35 @@ export function createApiApp(): express.Express {
 
   // Health
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, persistence: dbMode });
+    res.json({ ok: true, persistence: dbMode, authProvider: 'firebase' });
   });
 
-  app.post('/api/uploads', uploadImageMiddleware.single('photo'), async (req, res, next) => {
-    try {
-      if (!req.file) {
-        throw new HttpError(400, 'Please attach an image file to upload.');
-      }
-      const imageUrl = await saveBookPhoto(req.file);
-      res.status(201).json({ imageUrl });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // --- Auth Routes ---
-  app.post('/api/auth/signup', authRateLimiter, async (req, res, next) => {
-    try {
-      const name = sanitizeString(req.body?.name, 'Full name', 80);
-      const email = sanitizeString(req.body?.email, 'Email', 120).toLowerCase();
-      const password = sanitizeString(req.body?.password, 'Password', 128);
-      const city = sanitizeString(req.body?.city || 'Quetta', 'City', 60);
-
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new HttpError(400, 'Please provide a valid email address.');
-      }
-      if (password.length < 6) {
-        throw new HttpError(400, 'Password must be at least 6 characters.');
-      }
-
-      const existing = await findUserByEmail(email);
-      if (existing) {
-        throw new HttpError(409, 'An account with this email already exists.');
-      }
-
-      const passwordHash = await bcrypt.hash(password, 10);
-      const user = await createUser({ name, email, passwordHash, city });
-      const token = signToken({ id: user.id, email: user.email, name: user.name });
-      res.status(201).json({ token, user });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post('/api/auth/login', authRateLimiter, async (req, res, next) => {
-    try {
-      const email = sanitizeString(req.body?.email, 'Email', 120).toLowerCase();
-      const password = sanitizeString(req.body?.password, 'Password', 128);
-
-      const userRecord = await findUserByEmail(email);
-      if (!userRecord) {
-        throw new HttpError(401, 'Invalid email or password.');
-      }
-
-      const valid = await bcrypt.compare(password, userRecord.passwordHash);
-      if (!valid) {
-        throw new HttpError(401, 'Invalid email or password.');
-      }
-
-      const user = {
-        id: userRecord.id,
-        name: userRecord.name,
-        email: userRecord.email,
-        city: userRecord.city,
-        createdAt: userRecord.createdAt,
-      };
-      const token = signToken({ id: user.id, email: user.email, name: user.name });
-      res.json({ token, user });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.get('/api/auth/me', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const user = await findUserById(req.user!.id);
-      if (!user) {
-        throw new HttpError(404, 'Account not found.');
-      }
-      res.json({ user });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post('/api/auth/forgot-password', authRateLimiter, async (req, res, next) => {
-    try {
-      const email = sanitizeString(req.body?.email, 'Email', 120).toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new HttpError(400, 'Please provide a valid email address.');
-      }
-
-      const emailConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
-      const user = await findUserByEmail(email);
-
-      if (user) {
-        const rawToken = crypto.randomBytes(32).toString('hex');
-        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-        await setPasswordResetToken(user.email, tokenHash, expiresAt);
-
-        if (emailConfigured) {
-          const baseUrl = resolveResetBaseUrl(req, allowedOrigins);
-          const resetUrl = `${baseUrl}/reset-password?token=${rawToken}`;
-          await sendPasswordResetEmail(user.email, user.name, resetUrl);
+  // Authenticated photo upload backed by Firebase ID token verification
+  app.post(
+    '/api/uploads',
+    requireAuth,
+    requireVerifiedAuth,
+    uploadImageMiddleware.single('photo'),
+    async (req, res, next) => {
+      try {
+        if (!req.file) {
+          throw new HttpError(400, 'Please attach an image file to upload.');
         }
+        const imageUrl = await saveBookPhoto(req.file);
+        res.status(201).json({ imageUrl });
+      } catch (err) {
+        next(err);
       }
+    },
+  );
 
-      res.json({
-        message: 'If an account with that email exists, password reset instructions have been sent.',
-        emailConfigured,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post('/api/auth/reset-password', authRateLimiter, async (req, res, next) => {
+  // --- Firebase Auth Session Verification Route ---
+  app.get('/api/auth/me', authRateLimiter, requireAuth, async (req: AuthenticatedRequest, res, next) => {
     try {
-      const rawToken = sanitizeString(req.body?.token, 'Reset token', 128);
-      const password = sanitizeString(req.body?.password, 'New password', 128);
-
-      if (password.length < 6) {
-        throw new HttpError(400, 'New password must be at least 6 characters.');
-      }
-      if (!/^[a-f0-9]{64}$/i.test(rawToken)) {
-        throw new HttpError(400, 'This password reset link is invalid or has expired.');
-      }
-
-      const tokenHash = crypto.createHash('sha256').update(rawToken.toLowerCase()).digest('hex');
-      const newPasswordHash = await bcrypt.hash(password, 10);
-      const updated = await resetPasswordWithToken(tokenHash, newPasswordHash);
-
-      if (!updated) {
-        throw new HttpError(400, 'This password reset link is invalid or has expired.');
-      }
-
+      const user = await resolveAuthenticatedActor(req);
       res.json({
-        message: 'Your password has been updated. You can now sign in with your new password.',
+        user,
+        signInProvider: req.user?.signInProvider || null,
       });
     } catch (err) {
       next(err);
@@ -409,6 +227,7 @@ export function createApiApp(): express.Express {
   app.post(
     '/api/books',
     requireAuth,
+    requireVerifiedAuth,
     uploadImageMiddleware.single('photo'),
     async (req: AuthenticatedRequest, res, next) => {
       try {
@@ -433,10 +252,7 @@ export function createApiApp(): express.Express {
           imageUrl = validatePresetImageUrl(req.body?.imageUrl);
         }
 
-        const owner = await findUserById(req.user!.id);
-        if (!owner) {
-          throw new HttpError(401, 'User account no longer exists.');
-        }
+        const owner = await resolveAuthenticatedActor(req, city);
 
         const book = await createBook({
           title,
@@ -468,6 +284,7 @@ export function createApiApp(): express.Express {
   app.put(
     '/api/books/:id',
     requireAuth,
+    requireVerifiedAuth,
     uploadImageMiddleware.single('photo'),
     async (req: AuthenticatedRequest, res, next) => {
       try {
@@ -530,67 +347,74 @@ export function createApiApp(): express.Express {
     },
   );
 
-  app.delete('/api/books/:id', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const id = sanitizeString(req.params.id, 'Book ID', 64);
-      const existing = await getBookById(id);
-      if (!existing) {
-        throw new HttpError(404, 'Book listing not found.');
+  app.delete(
+    '/api/books/:id',
+    requireAuth,
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        const id = sanitizeString(req.params.id, 'Book ID', 64);
+        const existing = await getBookById(id);
+        if (!existing) {
+          throw new HttpError(404, 'Book listing not found.');
+        }
+        if (existing.ownerId !== req.user!.id) {
+          throw new HttpError(403, 'You can only delete your own book listings.');
+        }
+        await deleteBook(id);
+        res.json({ deleted: true, id });
+      } catch (err) {
+        next(err);
       }
-      if (existing.ownerId !== req.user!.id) {
-        throw new HttpError(403, 'You can only delete your own book listings.');
-      }
-      await deleteBook(id);
-      res.json({ deleted: true, id });
-    } catch (err) {
-      next(err);
-    }
-  });
+    },
+  );
 
   // --- Exchange / Sell / Buy Request Routes ---
-  app.post('/api/requests', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const bookId = sanitizeString(req.body?.bookId, 'Book ID', 64);
-      const message = sanitizeString(req.body?.message, 'Message', 600);
-      const contactNote = sanitizeString(req.body?.contactNote, 'Pickup / contact note', 180);
-      const offerBookTitle = sanitizeString(req.body?.offerBookTitle || '', 'Book offered', 140, false);
+  app.post(
+    '/api/requests',
+    requireAuth,
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        const bookId = sanitizeString(req.body?.bookId, 'Book ID', 64);
+        const message = sanitizeString(req.body?.message, 'Message', 600);
+        const contactNote = sanitizeString(req.body?.contactNote, 'Pickup / contact note', 180);
+        const offerBookTitle = sanitizeString(req.body?.offerBookTitle || '', 'Book offered', 140, false);
 
-      const book = await getBookById(bookId);
-      if (!book) {
-        throw new HttpError(404, 'Book listing not found.');
-      }
-      if (book.ownerId === req.user!.id) {
-        throw new HttpError(400, 'You cannot send a request to your own listing.');
-      }
-      if (book.listingType === 'Exchange' && !offerBookTitle) {
-        throw new HttpError(400, 'Please include the book title you are offering to swap.');
-      }
+        const book = await getBookById(bookId);
+        if (!book) {
+          throw new HttpError(404, 'Book listing not found.');
+        }
+        if (book.ownerId === req.user!.id) {
+          throw new HttpError(400, 'You cannot send a request to your own listing.');
+        }
+        if (book.listingType === 'Exchange' && !offerBookTitle) {
+          throw new HttpError(400, 'Please include the book title you are offering to swap.');
+        }
 
-      const requester = await findUserById(req.user!.id);
-      if (!requester) {
-        throw new HttpError(401, 'User account not found.');
+        const requester = await resolveAuthenticatedActor(req);
+
+        const created = await createRequest({
+          bookId: book.id,
+          bookTitle: book.title,
+          bookType: book.listingType,
+          bookImageUrl: book.imageUrl,
+          ownerId: book.ownerId,
+          ownerName: book.ownerName,
+          requesterId: requester.id,
+          requesterName: requester.name,
+          requesterCity: requester.city,
+          offerBookTitle,
+          message,
+          contactNote,
+        });
+
+        res.status(201).json({ request: created });
+      } catch (err) {
+        next(err);
       }
-
-      const created = await createRequest({
-        bookId: book.id,
-        bookTitle: book.title,
-        bookType: book.listingType,
-        bookImageUrl: book.imageUrl,
-        ownerId: book.ownerId,
-        ownerName: book.ownerName,
-        requesterId: requester.id,
-        requesterName: requester.name,
-        requesterCity: requester.city,
-        offerBookTitle,
-        message,
-        contactNote,
-      });
-
-      res.status(201).json({ request: created });
-    } catch (err) {
-      next(err);
-    }
-  });
+    },
+  );
 
   app.get('/api/requests/incoming', requireAuth, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -610,26 +434,31 @@ export function createApiApp(): express.Express {
     }
   });
 
-  app.patch('/api/requests/:id', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const id = sanitizeString(req.params.id, 'Request ID', 64);
-      const statusRaw = req.body?.status;
-      if (typeof statusRaw !== 'string' || !VALID_STATUSES.has(statusRaw as RequestStatus)) {
-        throw new HttpError(400, 'Status must be Pending, Accepted, or Declined.');
+  app.patch(
+    '/api/requests/:id',
+    requireAuth,
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        const id = sanitizeString(req.params.id, 'Request ID', 64);
+        const statusRaw = req.body?.status;
+        if (typeof statusRaw !== 'string' || !VALID_STATUSES.has(statusRaw as RequestStatus)) {
+          throw new HttpError(400, 'Status must be Pending, Accepted, or Declined.');
+        }
+        const existing = await getRequestById(id);
+        if (!existing) {
+          throw new HttpError(404, 'Request not found.');
+        }
+        if (existing.ownerId !== req.user!.id) {
+          throw new HttpError(403, 'Only the listing owner can update request status.');
+        }
+        const updated = await updateRequestStatus(id, statusRaw as RequestStatus);
+        res.json({ request: updated });
+      } catch (err) {
+        next(err);
       }
-      const existing = await getRequestById(id);
-      if (!existing) {
-        throw new HttpError(404, 'Request not found.');
-      }
-      if (existing.ownerId !== req.user!.id) {
-        throw new HttpError(403, 'Only the listing owner can update request status.');
-      }
-      const updated = await updateRequestStatus(id, statusRaw as RequestStatus);
-      res.json({ request: updated });
-    } catch (err) {
-      next(err);
-    }
-  });
+    },
+  );
 
   // --- Book Reviews & Reader Q&A Routes ---
   app.get('/api/books/:id/discussions', async (req, res, next) => {
@@ -646,106 +475,112 @@ export function createApiApp(): express.Express {
     }
   });
 
-  app.post('/api/books/:id/reviews', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const bookId = sanitizeString(req.params.id, 'Book ID', 64);
-      const book = await getBookById(bookId);
-      if (!book) {
-        throw new HttpError(404, 'Book listing not found.');
+  app.post(
+    '/api/books/:id/reviews',
+    requireAuth,
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        const bookId = sanitizeString(req.params.id, 'Book ID', 64);
+        const book = await getBookById(bookId);
+        if (!book) {
+          throw new HttpError(404, 'Book listing not found.');
+        }
+
+        const ratingNum = Number(req.body?.rating);
+        if (!Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+          throw new HttpError(400, 'Please select a star rating between 1 and 5.');
+        }
+        const comment = sanitizeString(req.body?.comment, 'Review comment', 1000);
+        if (comment.length < 5) {
+          throw new HttpError(400, 'Review comment must be at least 5 characters.');
+        }
+        const finishedReading = Boolean(req.body?.finishedReading);
+
+        const author = await resolveAuthenticatedActor(req);
+
+        const review = await createBookReview({
+          bookId,
+          authorId: author.id,
+          authorName: author.name,
+          authorCity: author.city,
+          rating: ratingNum,
+          comment,
+          finishedReading,
+        });
+
+        res.status(201).json({ review });
+      } catch (err) {
+        next(err);
       }
+    },
+  );
 
-      const ratingNum = Number(req.body?.rating);
-      if (!Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-        throw new HttpError(400, 'Please select a star rating between 1 and 5.');
+  app.post(
+    '/api/books/:id/questions',
+    requireAuth,
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        const bookId = sanitizeString(req.params.id, 'Book ID', 64);
+        const book = await getBookById(bookId);
+        if (!book) {
+          throw new HttpError(404, 'Book listing not found.');
+        }
+
+        const question = sanitizeString(req.body?.question, 'Question', 600);
+        if (question.length < 5) {
+          throw new HttpError(400, 'Please write a question of at least 5 characters.');
+        }
+
+        const author = await resolveAuthenticatedActor(req);
+
+        const created = await createBookQuestion({
+          bookId,
+          authorId: author.id,
+          authorName: author.name,
+          question,
+        });
+
+        res.status(201).json({ question: created });
+      } catch (err) {
+        next(err);
       }
-      const comment = sanitizeString(req.body?.comment, 'Review comment', 1000);
-      if (comment.length < 5) {
-        throw new HttpError(400, 'Review comment must be at least 5 characters.');
+    },
+  );
+
+  app.post(
+    '/api/questions/:questionId/answers',
+    requireAuth,
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        const questionId = sanitizeString(req.params.questionId, 'Question ID', 64);
+        const body = sanitizeString(req.body?.body, 'Answer', 800);
+        if (body.length < 3) {
+          throw new HttpError(400, 'Please write an answer of at least 3 characters.');
+        }
+        const hasReadBook = Boolean(req.body?.hasReadBook);
+
+        const author = await resolveAuthenticatedActor(req);
+
+        const updatedQuestion = await addQuestionAnswer(questionId, {
+          authorId: author.id,
+          authorName: author.name,
+          hasReadBook,
+          body,
+        });
+
+        if (!updatedQuestion) {
+          throw new HttpError(404, 'Question not found.');
+        }
+
+        res.status(201).json({ question: updatedQuestion });
+      } catch (err) {
+        next(err);
       }
-      const finishedReading = Boolean(req.body?.finishedReading);
-
-      const author = await findUserById(req.user!.id);
-      if (!author) {
-        throw new HttpError(401, 'User account not found.');
-      }
-
-      const review = await createBookReview({
-        bookId,
-        authorId: author.id,
-        authorName: author.name,
-        authorCity: author.city,
-        rating: ratingNum,
-        comment,
-        finishedReading,
-      });
-
-      res.status(201).json({ review });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post('/api/books/:id/questions', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const bookId = sanitizeString(req.params.id, 'Book ID', 64);
-      const book = await getBookById(bookId);
-      if (!book) {
-        throw new HttpError(404, 'Book listing not found.');
-      }
-
-      const question = sanitizeString(req.body?.question, 'Question', 600);
-      if (question.length < 5) {
-        throw new HttpError(400, 'Please write a question of at least 5 characters.');
-      }
-
-      const author = await findUserById(req.user!.id);
-      if (!author) {
-        throw new HttpError(401, 'User account not found.');
-      }
-
-      const created = await createBookQuestion({
-        bookId,
-        authorId: author.id,
-        authorName: author.name,
-        question,
-      });
-
-      res.status(201).json({ question: created });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post('/api/questions/:questionId/answers', requireAuth, async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const questionId = sanitizeString(req.params.questionId, 'Question ID', 64);
-      const body = sanitizeString(req.body?.body, 'Answer', 800);
-      if (body.length < 3) {
-        throw new HttpError(400, 'Please write an answer of at least 3 characters.');
-      }
-      const hasReadBook = Boolean(req.body?.hasReadBook);
-
-      const author = await findUserById(req.user!.id);
-      if (!author) {
-        throw new HttpError(401, 'User account not found.');
-      }
-
-      const updatedQuestion = await addQuestionAnswer(questionId, {
-        authorId: author.id,
-        authorName: author.name,
-        hasReadBook,
-        body,
-      });
-
-      if (!updatedQuestion) {
-        throw new HttpError(404, 'Question not found.');
-      }
-
-      res.status(201).json({ question: updatedQuestion });
-    } catch (err) {
-      next(err);
-    }
-  });
+    },
+  );
 
   // Unknown API routes return clean JSON 404
   app.use('/api', (_req, _res, next) => {

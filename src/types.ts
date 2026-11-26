@@ -14,6 +14,7 @@ export interface UserPublic {
   email: string;
   city: string;
   createdAt: string;
+  emailVerified?: boolean;
 }
 
 export interface BookListing {

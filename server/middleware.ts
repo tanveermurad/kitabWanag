@@ -1,19 +1,46 @@
-import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import type { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
-import jwt from 'jsonwebtoken';
+import { getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 
-const FALLBACK_JWT_SECRET = crypto.randomBytes(32).toString('hex');
+function resolveFirebaseProjectId(): string {
+  const fromEnv = process.env.FIREBASE_PROJECT_ID?.trim();
+  if (fromEnv && fromEnv !== 'remixed-project-id') {
+    return fromEnv;
+  }
 
-export function getJwtSecret(): string {
-  const configured = process.env.JWT_SECRET?.trim();
-  return configured && configured.length >= 16 ? configured : FALLBACK_JWT_SECRET;
+  try {
+    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { projectId?: string };
+      if (parsed.projectId && parsed.projectId !== 'remixed-project-id') {
+        return parsed.projectId;
+      }
+    }
+  } catch {
+    // Fall through to error when Auth verification is invoked
+  }
+
+  return '';
+}
+
+function getFirebaseAdminAuth(): Auth {
+  const projectId = resolveFirebaseProjectId();
+  if (!projectId) {
+    throw new Error('Firebase projectId is not configured on the server.');
+  }
+  const app = getApps().length ? getApp() : initializeApp({ projectId });
+  return getAuth(app);
 }
 
 export interface AuthPayload {
   id: string;
   email: string;
   name: string;
+  emailVerified: boolean;
+  signInProvider?: string;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -30,17 +57,17 @@ export class HttpError extends Error {
 
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 25,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts. Please wait a few minutes and try again.' },
 });
 
-export function signToken(payload: AuthPayload): string {
-  return jwt.sign(payload, getJwtSecret(), { expiresIn: '7d' });
-}
-
-export function requireAuth(req: AuthenticatedRequest, _res: Response, next: NextFunction): void {
+export async function requireAuth(
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     next(new HttpError(401, 'Please sign in to continue.'));
@@ -54,16 +81,51 @@ export function requireAuth(req: AuthenticatedRequest, _res: Response, next: Nex
   }
 
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as AuthPayload;
-    if (!decoded || typeof decoded.id !== 'string' || typeof decoded.email !== 'string') {
-      next(new HttpError(401, 'Invalid authentication session.'));
+    const decoded = await getFirebaseAdminAuth().verifyIdToken(token);
+    if (!decoded || typeof decoded.uid !== 'string') {
+      next(new HttpError(401, 'Invalid Firebase authentication session.'));
       return;
     }
-    req.user = { id: decoded.id, email: decoded.email, name: decoded.name };
+
+    const email = typeof decoded.email === 'string' ? decoded.email : '';
+    const displayName =
+      typeof decoded.name === 'string' && decoded.name.trim()
+        ? decoded.name.trim()
+        : email.split('@')[0] || 'Reader';
+
+    req.user = {
+      id: decoded.uid,
+      email,
+      name: displayName,
+      emailVerified: Boolean(decoded.email_verified),
+      signInProvider: decoded.firebase?.sign_in_provider,
+    };
     next();
-  } catch {
-    next(new HttpError(401, 'Your session has expired. Please sign in again.'));
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err ? String((err as { code?: unknown }).code) : '';
+    if (code === 'auth/id-token-expired') {
+      next(new HttpError(401, 'Your session has expired. Please sign in again.'));
+      return;
+    }
+    next(new HttpError(401, 'Invalid or expired Firebase ID token. Please sign in again.'));
   }
+}
+
+export function requireVerifiedAuth(
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction,
+): void {
+  if (!req.user) {
+    next(new HttpError(401, 'Please sign in to continue.'));
+    return;
+  }
+  if (!req.user.emailVerified) {
+    next(new HttpError(403, 'Please verify your email address before performing this action.'));
+    return;
+  }
+  next();
 }
 
 export function sanitizeString(value: unknown, fieldName: string, maxLen = 500, required = true): string {

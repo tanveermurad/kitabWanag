@@ -2,13 +2,14 @@ import { ArrowRight, MapPin } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BookCard } from '../components/BookCard';
+import { RecentActivityDashboard } from '../components/RecentActivityDashboard';
 import { useAuth } from '../context/AuthContext';
 import { booksApi, getErrorMessage } from '../lib/api';
 import type { BookListing } from '../types';
 
 export function HomePage() {
   const { isAuthenticated } = useAuth();
-  const [books, setBooks] = useState<BookListing[]>([]);
+  const [allBooks, setAllBooks] = useState<BookListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +20,7 @@ export function HomePage() {
     setError(null);
     try {
       const data = await booksApi.list();
-      setBooks(Array.isArray(data.books) ? data.books.slice(0, 6) : []);
+      setAllBooks(Array.isArray(data.books) ? data.books : []);
     } catch (err) {
       setError(getErrorMessage(err, 'Unable to load community listings.'));
     } finally {
@@ -37,13 +38,15 @@ export function HomePage() {
     setError(null);
     try {
       const seeded = await booksApi.seedStarterLibrary();
-      setBooks(seeded.slice(0, 6));
+      setAllBooks(seeded);
     } catch (err) {
       setError(getErrorMessage(err, 'Could not load starter books.'));
     } finally {
       setSeeding(false);
     }
   };
+
+  const books = allBooks.slice(0, 6);
 
   return (
     <div>
@@ -107,7 +110,14 @@ export function HomePage() {
         </div>
       </section>
 
-      {/* Section 2: Featured Books Grid */}
+      {/* Section 2: Recent Activity Dashboard */}
+      <RecentActivityDashboard
+        books={allBooks}
+        loadingBooks={loading}
+        onRefreshBooks={loadRecentBooks}
+      />
+
+      {/* Section 3: Featured Books Grid */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12 border-t border-[#E5DFD3]">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
           <div>

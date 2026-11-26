@@ -128,6 +128,7 @@ function docToBook(id: string, data: Record<string, unknown>, distanceKm?: numbe
     ownerId: String(data.ownerId || ''),
     ownerName: String(data.ownerName || ''),
     createdAt: tsToIso(data.createdAt),
+    ...(data.updatedAt ? { updatedAt: tsToIso(data.updatedAt) } : {}),
     ...(distanceKm !== undefined ? { distanceKm: Number(distanceKm.toFixed(1)) } : {}),
   };
 }
@@ -1150,5 +1151,69 @@ export const discussionsApi = {
         createdAt: new Date().toISOString(),
       },
     };
+  },
+
+  async listSummaryForBooks(bookIds: string[]): Promise<{
+    reviewsByBook: Record<string, BookReview[]>;
+    questionsByBook: Record<string, BookQuestion[]>;
+  }> {
+    const safeIds = bookIds
+      .map((id) => id.trim())
+      .filter((id) => VALID_ID_RX.test(id))
+      .slice(0, 12);
+
+    const reviewsByBook: Record<string, BookReview[]> = {};
+    const questionsByBook: Record<string, BookQuestion[]> = {};
+
+    await Promise.all(
+      safeIds.map(async (safeBookId) => {
+        const reviewsPath = `books/${safeBookId}/reviews`;
+        const questionsPath = `books/${safeBookId}/questions`;
+        let revSnap;
+        let qSnap;
+        try {
+          [revSnap, qSnap] = await Promise.all([
+            getDocs(query(collection(db, 'books', safeBookId, 'reviews'), where('bookId', '==', safeBookId))),
+            getDocs(query(collection(db, 'books', safeBookId, 'questions'), where('bookId', '==', safeBookId))),
+          ]);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.LIST, `${reviewsPath} | ${questionsPath}`);
+        }
+
+        reviewsByBook[safeBookId] = revSnap.docs
+          .map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              bookId: String(data.bookId || safeBookId),
+              authorId: String(data.authorId || ''),
+              authorName: String(data.authorName || ''),
+              authorCity: String(data.authorCity || ''),
+              rating: Number(data.rating ?? 5),
+              comment: String(data.comment || ''),
+              finishedReading: Boolean(data.finishedReading),
+              createdAt: tsToIso(data.createdAt),
+            };
+          })
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        questionsByBook[safeBookId] = qSnap.docs
+          .map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              bookId: String(data.bookId || safeBookId),
+              authorId: String(data.authorId || ''),
+              authorName: String(data.authorName || ''),
+              question: String(data.question || ''),
+              answers: [],
+              createdAt: tsToIso(data.createdAt),
+            };
+          })
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      }),
+    );
+
+    return { reviewsByBook, questionsByBook };
   },
 };

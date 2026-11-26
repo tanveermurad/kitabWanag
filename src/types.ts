@@ -37,6 +37,7 @@ export interface BookListing {
   ownerId: string;
   ownerName: string;
   createdAt: string;
+  updatedAt?: string;
   distanceKm?: number;
 }
 

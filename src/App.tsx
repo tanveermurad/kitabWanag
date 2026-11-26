@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage';
 import { MapPage } from './pages/MapPage';
 import { MyListingsPage } from './pages/MyListingsPage';
 import { PostBookPage } from './pages/PostBookPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { SignupPage } from './pages/SignupPage';
 
 function NotFoundPage() {
@@ -63,6 +64,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <ProfilePage />
                   </ProtectedRoute>
                 }
               />

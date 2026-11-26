@@ -46,6 +46,13 @@ export const authApi = {
       fallbackMessage: 'Could not create account.',
     });
   },
+
+  me() {
+    return apiRequest<{ user: UserPublic }>('/api/auth/me', {
+      auth: true,
+      fallbackMessage: 'Could not load your profile.',
+    });
+  },
 };
 
 export const booksApi = {

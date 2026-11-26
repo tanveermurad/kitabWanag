@@ -165,104 +165,120 @@ export async function apiRequest<T>(endpoint: string, options: ApiRequestOptions
     }
   }
 
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort('timeout'), timeoutMs);
+  const method = (restInit.method || 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' ? 2 : 1;
 
-  const forwardAbort = () => controller.abort(externalSignal?.reason);
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      controller.abort(externalSignal.reason);
-    } else {
-      externalSignal.addEventListener('abort', forwardAbort, { once: true });
-    }
-  }
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort('timeout'), timeoutMs);
 
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(endpoint), {
-      ...restInit,
-      headers,
-      body,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (externalSignal?.aborted) {
-      throw err;
+    const forwardAbort = () => controller.abort(externalSignal?.reason);
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort(externalSignal.reason);
+      } else {
+        externalSignal.addEventListener('abort', forwardAbort, { once: true });
+      }
     }
-    if (controller.signal.aborted && controller.signal.reason === 'timeout') {
+
+    let res: Response;
+    try {
+      res = await fetch(apiUrl(endpoint), {
+        ...restInit,
+        headers,
+        body,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (externalSignal?.aborted) {
+        throw err;
+      }
+      if (controller.signal.aborted && controller.signal.reason === 'timeout') {
+        throw new ApiError(
+          'The request timed out. Please check your connection and try again.',
+          0,
+          'TIMEOUT',
+          endpoint,
+        );
+      }
+      if (attempt < maxAttempts) {
+        await new Promise((r) => window.setTimeout(r, 500));
+        continue;
+      }
       throw new ApiError(
-        'The request timed out. Please check your connection and try again.',
+        'Network error. Please check your internet connection and try again.',
         0,
-        'TIMEOUT',
+        'NETWORK_ERROR',
+        endpoint,
+      );
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', forwardAbort);
+      }
+    }
+
+    if (res.status >= 502 && res.status <= 504 && attempt < maxAttempts) {
+      await new Promise((r) => window.setTimeout(r, 500));
+      continue;
+    }
+
+    if (res.status === 401 && onUnauthorizedHandler) {
+      onUnauthorizedHandler();
+    }
+
+    if (res.status === 204) {
+      return undefined as T;
+    }
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const isJson = contentType.includes('application/json');
+
+    if (!isJson) {
+      if (!res.ok) {
+        throw new ApiError(
+          defaultMessageForStatus(res.status, fallbackMessage, true),
+          res.status,
+          mapStatusToCode(res.status),
+          endpoint,
+        );
+      }
+      throw new ApiError(
+        `${fallbackMessage} The backend API was not reached (received an HTML page instead of JSON).`,
+        res.status || 502,
+        'INVALID_RESPONSE',
         endpoint,
       );
     }
-    throw new ApiError(
-      'Network error. Please check your internet connection and try again.',
-      0,
-      'NETWORK_ERROR',
-      endpoint,
-    );
-  } finally {
-    window.clearTimeout(timeoutId);
-    if (externalSignal) {
-      externalSignal.removeEventListener('abort', forwardAbort);
-    }
-  }
 
-  if (res.status === 401 && onUnauthorizedHandler) {
-    onUnauthorizedHandler();
-  }
-
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  const contentType = (res.headers.get('content-type') || '').toLowerCase();
-  const isJson = contentType.includes('application/json');
-
-  if (!isJson) {
-    if (!res.ok) {
+    let payload: unknown;
+    try {
+      payload = await res.json();
+    } catch {
       throw new ApiError(
-        defaultMessageForStatus(res.status, fallbackMessage, true),
+        `${fallbackMessage} Could not read the server response.`,
+        res.status || 502,
+        'INVALID_RESPONSE',
+        endpoint,
+      );
+    }
+
+    if (!res.ok) {
+      const serverError =
+        payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: unknown }).error === 'string'
+          ? (payload as { error: string }).error
+          : null;
+
+      throw new ApiError(
+        serverError || defaultMessageForStatus(res.status, fallbackMessage, false),
         res.status,
         mapStatusToCode(res.status),
         endpoint,
       );
     }
-    throw new ApiError(
-      `${fallbackMessage} The API server returned an unexpected non-JSON response.`,
-      res.status || 502,
-      'INVALID_RESPONSE',
-      endpoint,
-    );
+
+    return payload as T;
   }
 
-  let payload: unknown;
-  try {
-    payload = await res.json();
-  } catch {
-    throw new ApiError(
-      `${fallbackMessage} Could not read the server response.`,
-      res.status || 502,
-      'INVALID_RESPONSE',
-      endpoint,
-    );
-  }
-
-  if (!res.ok) {
-    const serverError =
-      payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: unknown }).error === 'string'
-        ? (payload as { error: string }).error
-        : null;
-
-    throw new ApiError(
-      serverError || defaultMessageForStatus(res.status, fallbackMessage, false),
-      res.status,
-      mapStatusToCode(res.status),
-      endpoint,
-    );
-  }
-
-  return payload as T;
+  throw new ApiError(fallbackMessage, 0, 'UNKNOWN_ERROR', endpoint);
 }

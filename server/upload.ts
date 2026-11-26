@@ -69,7 +69,13 @@ function getCloudinaryCredentials(): CloudinaryCredentials | null {
   return null;
 }
 
-const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/pjpeg',
+  'image/png',
+  'image/webp',
+]);
 
 export const uploadImageMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -78,7 +84,7 @@ export const uploadImageMiddleware = multer({
     files: 1,
   },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype.toLowerCase())) {
       cb(new HttpError(400, 'Only JPEG, PNG, or WebP book photos are supported.'));
       return;
     }

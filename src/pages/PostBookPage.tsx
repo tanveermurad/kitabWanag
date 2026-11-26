@@ -57,6 +57,7 @@ export function PostBookPage() {
   const [loadingInitial, setLoadingInitial] = useState(isEditing);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [geoStatus, setGeoStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -114,16 +115,24 @@ export function PostBookPage() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setError('Please choose a JPEG, PNG, or WebP photo.');
+    const allowedMime = new Set(['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp']);
+    const mimeOk = file.type ? allowedMime.has(file.type.toLowerCase()) : /\.(jpe?g|png|webp)$/i.test(file.name);
+    if (!mimeOk) {
+      const msg = 'Please choose a JPEG, PNG, or WebP photo.';
+      setPhotoError(msg);
+      setError(msg);
       return;
     }
     if (file.size > 4 * 1024 * 1024) {
-      setError('Photo must be 4 MB or smaller.');
+      const msg = 'Photo must be 4 MB or smaller.';
+      setPhotoError(msg);
+      setError(msg);
       return;
     }
     setError(null);
+    setPhotoError(null);
     setSelectedFile(file);
     setCustomImageUrl('');
     setPreviewFailed(false);
@@ -265,6 +274,7 @@ export function PostBookPage() {
                 type="button"
                 onClick={() => {
                   setSelectedFile(null);
+                  setPhotoError(null);
                   setPreviewFailed(false);
                   setPreviewUrl(customImageUrl.trim() || presetImageUrl);
                 }}
@@ -272,6 +282,11 @@ export function PostBookPage() {
               >
                 Clear selected photo ({selectedFile.name})
               </button>
+            )}
+            {photoError && (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {photoError}
+              </p>
             )}
           </div>
 

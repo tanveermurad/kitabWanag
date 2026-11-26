@@ -17,6 +17,8 @@ import type {
 
 interface StoredUser extends UserPublic {
   passwordHash: string;
+  resetTokenHash?: string | null;
+  resetTokenExpiresAt?: string | null;
 }
 
 interface LocalDatabase {
@@ -44,6 +46,8 @@ const UserSchema = new Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
     city: { type: String, required: true, trim: true },
+    resetTokenHash: { type: String, default: null },
+    resetTokenExpiresAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
@@ -774,6 +778,78 @@ export async function createUser(input: {
   db.users.push(newUser);
   saveLocalDb(db);
   return toPublicUser(newUser);
+}
+
+export async function setPasswordResetToken(
+  email: string,
+  tokenHash: string,
+  expiresAt: Date,
+): Promise<boolean> {
+  const normalized = email.trim().toLowerCase();
+  if (usingMongo) {
+    const res = await UserModel.updateOne(
+      { email: normalized },
+      {
+        $set: {
+          resetTokenHash: tokenHash,
+          resetTokenExpiresAt: expiresAt,
+        },
+      },
+    );
+    return res.matchedCount > 0;
+  }
+
+  const db = loadLocalDb();
+  const idx = db.users.findIndex((u) => u.email.toLowerCase() === normalized);
+  if (idx === -1) return false;
+  db.users[idx] = {
+    ...db.users[idx],
+    resetTokenHash: tokenHash,
+    resetTokenExpiresAt: expiresAt.toISOString(),
+  };
+  saveLocalDb(db);
+  return true;
+}
+
+export async function resetPasswordWithToken(
+  tokenHash: string,
+  newPasswordHash: string,
+): Promise<boolean> {
+  const now = new Date();
+  if (usingMongo) {
+    const updated = await UserModel.findOneAndUpdate(
+      {
+        resetTokenHash: tokenHash,
+        resetTokenExpiresAt: { $gt: now },
+      },
+      {
+        $set: {
+          passwordHash: newPasswordHash,
+          resetTokenHash: null,
+          resetTokenExpiresAt: null,
+        },
+      },
+      { new: true },
+    ).lean();
+    return Boolean(updated);
+  }
+
+  const db = loadLocalDb();
+  const idx = db.users.findIndex((u) => {
+    if (!u.resetTokenHash || !u.resetTokenExpiresAt) return false;
+    const expiresMs = new Date(u.resetTokenExpiresAt).getTime();
+    return u.resetTokenHash === tokenHash && Number.isFinite(expiresMs) && expiresMs > now.getTime();
+  });
+  if (idx === -1) return false;
+
+  db.users[idx] = {
+    ...db.users[idx],
+    passwordHash: newPasswordHash,
+    resetTokenHash: null,
+    resetTokenExpiresAt: null,
+  };
+  saveLocalDb(db);
+  return true;
 }
 
 export async function listBooks(filters: {

@@ -53,6 +53,22 @@ export const authApi = {
       fallbackMessage: 'Could not load your profile.',
     });
   },
+
+  forgotPassword(email: string) {
+    return apiRequest<{ message: string; emailConfigured?: boolean }>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: { email },
+      fallbackMessage: 'Could not request a password reset.',
+    });
+  },
+
+  resetPassword(token: string, password: string) {
+    return apiRequest<{ message: string }>('/api/auth/reset-password', {
+      method: 'POST',
+      body: { token, password },
+      fallbackMessage: 'Could not reset password.',
+    });
+  },
 };
 
 export const booksApi = {

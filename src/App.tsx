@@ -5,12 +5,14 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { BookDetailPage } from './pages/BookDetailPage';
 import { BrowsePage } from './pages/BrowsePage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { MapPage } from './pages/MapPage';
 import { MyListingsPage } from './pages/MyListingsPage';
 import { PostBookPage } from './pages/PostBookPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SignupPage } from './pages/SignupPage';
 
 function NotFoundPage() {
@@ -43,6 +45,8 @@ export default function App() {
               <Route path="/map" element={<MapPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route
                 path="/post"
                 element={

@@ -1,4 +1,3 @@
-import { v2 as cloudinary } from 'cloudinary';
 import crypto from 'crypto';
 import fs from 'fs';
 import multer from 'multer';
@@ -22,11 +21,26 @@ interface CloudinaryCredentials {
   api_secret: string;
 }
 
+function normalizeCloudinaryUrl(raw: string): string {
+  let value = raw.trim();
+  if (value.toUpperCase().startsWith('CLOUDINARY_URL=')) {
+    value = value.slice('CLOUDINARY_URL='.length).trim();
+  }
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+}
+
 function getCloudinaryCredentials(): CloudinaryCredentials | null {
-  const rawUrl = process.env.CLOUDINARY_URL?.trim();
-  if (rawUrl) {
+  const rawEnv = process.env.CLOUDINARY_URL;
+  if (rawEnv) {
+    const normalized = normalizeCloudinaryUrl(rawEnv);
     try {
-      const parsed = new URL(rawUrl);
+      const parsed = new URL(normalized);
       if (parsed.protocol === 'cloudinary:') {
         const cloud_name = parsed.hostname.trim();
         const api_key = decodeURIComponent(parsed.username).trim();
@@ -109,12 +123,22 @@ export async function saveBookPhoto(file: Express.Multer.File): Promise<string> 
 
   const creds = getCloudinaryCredentials();
   if (creds) {
-    cloudinary.config({
-      cloud_name: creds.cloud_name,
-      api_key: creds.api_key,
-      api_secret: creds.api_secret,
-      secure: true,
-    });
+    const savedCloudinaryUrl = process.env.CLOUDINARY_URL;
+    delete process.env.CLOUDINARY_URL;
+    let cloudinary: typeof import('cloudinary').v2;
+    try {
+      ({ v2: cloudinary } = await import('cloudinary'));
+      cloudinary.config({
+        cloud_name: creds.cloud_name,
+        api_key: creds.api_key,
+        api_secret: creds.api_secret,
+        secure: true,
+      });
+    } finally {
+      if (savedCloudinaryUrl !== undefined) {
+        process.env.CLOUDINARY_URL = savedCloudinaryUrl;
+      }
+    }
 
     return await new Promise<string>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(

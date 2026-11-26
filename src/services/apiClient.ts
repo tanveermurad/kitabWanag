@@ -104,8 +104,10 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong. 
         return 'Google sign-in was cancelled before completion. Please try again.';
       case 'auth/popup-blocked':
         return 'Your browser blocked the Google sign-in popup. Please allow popups for this site and try again.';
-      case 'auth/unauthorized-domain':
-        return 'This domain is not authorized for Firebase sign-in yet. Add it under Firebase Console → Authentication → Settings → Authorized domains.';
+      case 'auth/unauthorized-domain': {
+        const host = typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'this domain';
+        return `The domain "${host}" is not authorized for Firebase sign-in yet. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains.`;
+      }
       case 'auth/operation-not-allowed':
         return 'This sign-in method is not enabled in Firebase Authentication yet. Enable it in Firebase Console → Authentication → Sign-in method.';
       case 'auth/network-request-failed':

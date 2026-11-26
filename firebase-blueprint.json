@@ -1,0 +1,404 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Public reader profile metadata without PII.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "city": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "city", "createdAt"]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private reader PII isolated under owner-only access.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "updatedAt"]
+    },
+    "BookListing": {
+      "title": "BookListing",
+      "description": "Community book listing for Exchange, Sell, or Buy.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "isbn": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "listingType": {
+          "type": "string",
+          "enum": ["Exchange", "Sell", "Buy"]
+        },
+        "condition": {
+          "type": "string",
+          "enum": ["Like New", "Good", "Fair", "Any"]
+        },
+        "price": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["PKR"]
+        },
+        "exchangeFor": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "imageUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "city": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "neighborhood": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "lng": {
+          "type": "number"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "title",
+        "author",
+        "isbn",
+        "category",
+        "language",
+        "listingType",
+        "condition",
+        "price",
+        "currency",
+        "exchangeFor",
+        "description",
+        "imageUrl",
+        "city",
+        "neighborhood",
+        "lng",
+        "lat",
+        "ownerId",
+        "ownerName",
+        "createdAt"
+      ]
+    },
+    "BookRequest": {
+      "title": "BookRequest",
+      "description": "Direct exchange, buy, or offer request between requester and listing owner.",
+      "type": "object",
+      "properties": {
+        "bookId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "bookTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "bookType": {
+          "type": "string",
+          "enum": ["Exchange", "Sell", "Buy"]
+        },
+        "bookImageUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "requesterId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "requesterName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "requesterCity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "offerBookTitle": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "contactNote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Accepted", "Declined"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "bookId",
+        "bookTitle",
+        "bookType",
+        "bookImageUrl",
+        "ownerId",
+        "ownerName",
+        "requesterId",
+        "requesterName",
+        "requesterCity",
+        "offerBookTitle",
+        "message",
+        "contactNote",
+        "status",
+        "createdAt"
+      ]
+    },
+    "BookReview": {
+      "title": "BookReview",
+      "description": "Reader review on a book listing.",
+      "type": "object",
+      "properties": {
+        "bookId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "authorCity": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "rating": {
+          "type": "integer"
+        },
+        "comment": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 1000
+        },
+        "finishedReading": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["bookId", "authorId", "authorName", "authorCity", "rating", "comment", "finishedReading", "createdAt"]
+    },
+    "BookQuestion": {
+      "title": "BookQuestion",
+      "description": "Reader question on a book listing.",
+      "type": "object",
+      "properties": {
+        "bookId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "question": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 600
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["bookId", "authorId", "authorName", "question", "createdAt"]
+    },
+    "BookAnswer": {
+      "title": "BookAnswer",
+      "description": "Community answer to a reader question.",
+      "type": "object",
+      "properties": {
+        "bookId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "hasReadBook": {
+          "type": "boolean"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 800
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["bookId", "questionId", "authorId", "authorName", "hasReadBook", "body", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Public reader profile metadata."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Owner-only private reader email PII."
+    },
+    "/books/{bookId}": {
+      "schema": { "$ref": "#/entities/BookListing" },
+      "description": "Community book listings."
+    },
+    "/books/{bookId}/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/BookReview" },
+      "description": "Reader reviews for a book listing."
+    },
+    "/books/{bookId}/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/BookQuestion" },
+      "description": "Reader questions for a book listing."
+    },
+    "/books/{bookId}/questions/{questionId}/answers/{answerId}": {
+      "schema": { "$ref": "#/entities/BookAnswer" },
+      "description": "Community answers for a book question."
+    },
+    "/requests/{requestId}": {
+      "schema": { "$ref": "#/entities/BookRequest" },
+      "description": "Exchange, buy, or offer requests between two readers."
+    }
+  }
+}

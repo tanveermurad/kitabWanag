@@ -6,7 +6,7 @@ import { booksApi, getErrorMessage, requestsApi, resolveBookImageUrl } from '../
 import type { BookListing, BookRequest, RequestStatus } from '../types';
 
 export function MyListingsPage() {
-  const { user } = useAuth();
+  const { user, authReady, isAuthenticated } = useAuth();
   const [books, setBooks] = useState<BookListing[]>([]);
   const [incoming, setIncoming] = useState<BookRequest[]>([]);
   const [outgoing, setOutgoing] = useState<BookRequest[]>([]);
@@ -35,8 +35,66 @@ export function MyListingsPage() {
 
   useEffect(() => {
     document.title = 'My Listings — KitabWanag';
-    void loadDashboard();
-  }, [loadDashboard]);
+    if (!authReady || !isAuthenticated || !user?.id) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    let booksLoaded = false;
+    let incomingLoaded = false;
+    let outgoingLoaded = false;
+    const markReady = () => {
+      if (booksLoaded && incomingLoaded && outgoingLoaded) {
+        setLoading(false);
+      }
+    };
+
+    const unsubBooks = booksApi.subscribeMine(
+      user.id,
+      (nextBooks) => {
+        setBooks(nextBooks);
+        booksLoaded = true;
+        markReady();
+      },
+      (err) => {
+        setError(getErrorMessage(err, 'Unable to load your book listings.'));
+        setLoading(false);
+      },
+    );
+
+    const unsubIncoming = requestsApi.subscribeIncoming(
+      user.id,
+      (nextIncoming) => {
+        setIncoming(nextIncoming);
+        incomingLoaded = true;
+        markReady();
+      },
+      (err) => {
+        setError(getErrorMessage(err, 'Unable to load incoming requests.'));
+        setLoading(false);
+      },
+    );
+
+    const unsubOutgoing = requestsApi.subscribeOutgoing(
+      user.id,
+      (nextOutgoing) => {
+        setOutgoing(nextOutgoing);
+        outgoingLoaded = true;
+        markReady();
+      },
+      (err) => {
+        setError(getErrorMessage(err, 'Unable to load outgoing requests.'));
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      unsubBooks();
+      unsubIncoming();
+      unsubOutgoing();
+    };
+  }, [authReady, isAuthenticated, user?.id]);
 
   const handleDeleteBook = async (bookId: string) => {
     try {

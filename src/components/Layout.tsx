@@ -92,8 +92,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const handleSignOut = () => {
-    logout();
+  const handleSignOut = async () => {
+    await logout();
     setMobileMenuOpen(false);
     navigate('/');
   };

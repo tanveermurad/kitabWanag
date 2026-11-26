@@ -1,17 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../lib/api';
 import { CITY_PRESETS } from '../lib/cities';
 
 export function SignupPage() {
-  const { signup } = useAuth();
+  const { isAuthenticated, authReady, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { from?: string } | null)?.from || '/my-listings';
 
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
   const [city, setCity] = useState('Quetta');
-  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,15 +19,18 @@ export function SignupPage() {
     document.title = 'Create Account — KitabWanag';
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  if (authReady && isAuthenticated) {
+    return <Navigate to={returnTo} replace />;
+  }
+
+  const handleGoogleSignUp = async () => {
     setSubmitting(true);
     setError(null);
     try {
-      await signup(name, email, password, city);
-      navigate('/my-listings', { replace: true });
+      await loginWithGoogle(city);
+      navigate(returnTo, { replace: true });
     } catch (err) {
-      setError(getErrorMessage(err, 'Could not create account.'));
+      setError(getErrorMessage(err, 'Could not create your account with Google. Please try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -37,104 +40,67 @@ export function SignupPage() {
     <div className="max-w-md mx-auto px-4 sm:px-6 py-14">
       <div className="bg-[#FFFFFF] border border-[#E5DFD3] rounded-2xl p-6 sm:p-8 space-y-6">
         <div>
-          <h1 className="font-display text-3xl font-bold text-[#1C1F1D]">Create account</h1>
-          <p className="text-sm text-[#5C615D] mt-1.5">
-            Join readers nearby to post books, arrange swaps, and request copies.
+          <h1 className="font-display text-3xl font-bold text-[#1C1F1D]">
+            Create your KitabWanag account
+          </h1>
+          <p className="text-sm text-[#5C615D] mt-1.5 leading-relaxed">
+            Choose your home city and continue with Google to list books for exchange or sale,
+            message nearby readers, and join book discussions.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="signupName" className="block text-sm font-medium text-[#1C1F1D] mb-1.5">
-              Full name
-            </label>
-            <input
-              id="signupName"
-              type="text"
-              required
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Sanaullah Kurd"
-              className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="signupEmail" className="block text-sm font-medium text-[#1C1F1D] mb-1.5">
-              Email address
-            </label>
-            <input
-              id="signupEmail"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="signupCity" className="block text-sm font-medium text-[#1C1F1D] mb-1.5">
-              Your city
-            </label>
-            <select
-              id="signupCity"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
-            >
-              {CITY_PRESETS.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}, {c.region}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label
-              htmlFor="signupPassword"
-              className="block text-sm font-medium text-[#1C1F1D] mb-1.5"
-            >
-              Password (minimum 6 characters)
-            </label>
-            <input
-              id="signupPassword"
-              type="password"
-              required
-              minLength={6}
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Choose a strong password"
-              className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
-            />
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
+        <div>
+          <label htmlFor="signupCity" className="block text-sm font-medium text-[#1C1F1D] mb-1.5">
+            Your city
+          </label>
+          <select
+            id="signupCity"
+            value={city}
             disabled={submitting}
-            className="w-full py-3 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold hover:bg-[#143A2F] disabled:opacity-60 transition-colors cursor-pointer"
+            onChange={(e) => setCity(e.target.value)}
+            className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm text-[#1C1F1D] focus:outline-none focus:border-[#1B4D3E]"
           >
-            {submitting ? 'Creating account...' : 'Create Account'}
-          </button>
-        </form>
+            {CITY_PRESETS.map((preset) => (
+              <option key={preset.name} value={preset.name}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-[#5C615D] mt-1.5">
+            You can change your city anytime from your reader profile.
+          </p>
+        </div>
 
-        <p className="text-sm text-[#5C615D] text-center pt-2 border-t border-[#E5DFD3]">
-          Already have an account?{' '}
-          <Link to="/login" className="font-semibold text-[#1B4D3E] hover:underline">
-            Sign in
-          </Link>
-        </p>
+        {error && (
+          <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => void handleGoogleSignUp()}
+          disabled={submitting || !authReady}
+          className="w-full py-3 px-4 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold hover:bg-[#143A2F] disabled:opacity-60 transition-colors flex items-center justify-center gap-3 cursor-pointer"
+        >
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M21.35 11.1h-9.17v2.98h5.27c-.23 1.46-1.69 4.28-5.27 4.28a6.08 6.08 0 1 1 0-12.16c1.75 0 2.93.75 3.6 1.4l2.45-2.36A9.4 9.4 0 0 0 12.18 2.5a9.5 9.5 0 1 0 0 19c5.48 0 9.12-3.85 9.12-9.27 0-.62-.07-1.1-.15-1.13Z"
+            />
+          </svg>
+          <span>{submitting ? 'Creating account...' : 'Sign up with Google'}</span>
+        </button>
+
+        <div className="pt-4 border-t border-[#E5DFD3] space-y-2 text-xs text-[#5C615D]">
+          <p className="leading-relaxed">
+            Already have an account?{' '}
+            <Link to="/login" state={location.state} className="font-semibold text-[#1B4D3E] hover:underline">
+              Sign in
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

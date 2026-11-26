@@ -2,12 +2,15 @@ import { ArrowRight, MapPin } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BookCard } from '../components/BookCard';
+import { useAuth } from '../context/AuthContext';
 import { booksApi, getErrorMessage } from '../lib/api';
 import type { BookListing } from '../types';
 
 export function HomePage() {
+  const { isAuthenticated } = useAuth();
   const [books, setBooks] = useState<BookListing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [heroImgFailed, setHeroImgFailed] = useState(false);
 
@@ -28,6 +31,19 @@ export function HomePage() {
     document.title = 'KitabWanag — Exchange, Sell & Buy Books Nearby';
     void loadRecentBooks();
   }, [loadRecentBooks]);
+
+  const handleSeedBooks = async () => {
+    setSeeding(true);
+    setError(null);
+    try {
+      const seeded = await booksApi.seedStarterLibrary();
+      setBooks(seeded.slice(0, 6));
+    } catch (err) {
+      setError(getErrorMessage(err, 'Could not load starter books.'));
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   return (
     <div>
@@ -142,19 +158,31 @@ export function HomePage() {
             </button>
           </div>
         ) : books.length === 0 ? (
-          <div className="rounded-xl border border-[#E5DFD3] bg-[#FFFFFF] p-10 text-center">
+          <div className="rounded-xl border border-[#E5DFD3] bg-[#FFFFFF] p-10 text-center space-y-4">
             <p className="font-display text-xl font-semibold text-[#1C1F1D]">
               No books listed yet
             </p>
-            <p className="text-sm text-[#5C615D] mt-2">
+            <p className="text-sm text-[#5C615D]">
               Be the first reader in your area to share a textbook or novel.
             </p>
-            <Link
-              to="/post"
-              className="inline-flex mt-5 px-5 py-2.5 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold"
-            >
-              Post a Book
-            </Link>
+            <div className="flex flex-wrap justify-center gap-3 pt-1">
+              <Link
+                to="/post"
+                className="inline-flex px-5 py-2.5 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold"
+              >
+                Post a Book
+              </Link>
+              {isAuthenticated && (
+                <button
+                  type="button"
+                  disabled={seeding}
+                  onClick={() => void handleSeedBooks()}
+                  className="px-5 py-2.5 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold hover:bg-[#F3EFE6] disabled:opacity-60 cursor-pointer"
+                >
+                  {seeding ? 'Adding sample books...' : 'Load Sample Community Books'}
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">

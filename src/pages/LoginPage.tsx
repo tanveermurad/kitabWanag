@@ -1,16 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../lib/api';
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { isAuthenticated, authReady, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const returnTo = (location.state as { from?: string } | null)?.from || '/my-listings';
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,111 +17,67 @@ export function LoginPage() {
     document.title = 'Sign In — KitabWanag';
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  if (authReady && isAuthenticated) {
+    return <Navigate to={returnTo} replace />;
+  }
+
+  const handleGoogleSignIn = async () => {
     setSubmitting(true);
     setError(null);
     try {
-      await login(email, password);
+      await loginWithGoogle();
       navigate(returnTo, { replace: true });
     } catch (err) {
-      setError(getErrorMessage(err, 'Invalid email or password.'));
+      setError(getErrorMessage(err, 'Could not complete Google sign-in. Please try again.'));
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const fillDemoReader = () => {
-    setEmail('reader@kitabwanag.org');
-    setPassword('KitabDemo2026!');
-    setError(null);
   };
 
   return (
     <div className="max-w-md mx-auto px-4 sm:px-6 py-14">
       <div className="bg-[#FFFFFF] border border-[#E5DFD3] rounded-2xl p-6 sm:p-8 space-y-6">
         <div>
-          <h1 className="font-display text-3xl font-bold text-[#1C1F1D]">Sign in</h1>
-          <p className="text-sm text-[#5C615D] mt-1.5">
-            Access your posted books, incoming swap requests, and saved neighborhood listings.
+          <h1 className="font-display text-3xl font-bold text-[#1C1F1D]">Sign in to KitabWanag</h1>
+          <p className="text-sm text-[#5C615D] mt-1.5 leading-relaxed">
+            Use your Google account to post books, manage swap and purchase requests, write reader
+            reviews, and keep your shelf synced across devices.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="loginEmail" className="block text-sm font-medium text-[#1C1F1D] mb-1.5">
-              Email address
-            </label>
-            <input
-              id="loginEmail"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="reader@kitabwanag.org"
-              className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
+        {error && (
+          <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => void handleGoogleSignIn()}
+          disabled={submitting || !authReady}
+          className="w-full py-3 px-4 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold hover:bg-[#143A2F] disabled:opacity-60 transition-colors flex items-center justify-center gap-3 cursor-pointer"
+        >
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M21.35 11.1h-9.17v2.98h5.27c-.23 1.46-1.69 4.28-5.27 4.28a6.08 6.08 0 1 1 0-12.16c1.75 0 2.93.75 3.6 1.4l2.45-2.36A9.4 9.4 0 0 0 12.18 2.5a9.5 9.5 0 1 0 0 19c5.48 0 9.12-3.85 9.12-9.27 0-.62-.07-1.1-.15-1.13Z"
             />
-          </div>
+          </svg>
+          <span>{submitting ? 'Signing in...' : 'Continue with Google'}</span>
+        </button>
 
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <label htmlFor="loginPassword" className="block text-sm font-medium text-[#1C1F1D]">
-                Password
-              </label>
-              <Link
-                to="/forgot-password"
-                className="text-xs font-medium text-[#1B4D3E] hover:underline whitespace-nowrap shrink-0"
-              >
-                Forgot password?
-              </Link>
-            </div>
-            <input
-              id="loginPassword"
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              className="w-full h-11 px-3.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
-            />
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full py-3 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold hover:bg-[#143A2F] disabled:opacity-60 transition-colors cursor-pointer"
-          >
-            {submitting ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
-
-        <div className="pt-4 border-t border-[#E5DFD3] space-y-3">
-          <div className="rounded-lg bg-[#F3EFE6] p-3.5 text-xs text-[#5C615D] space-y-2">
-            <p className="font-medium text-[#1C1F1D]">Want to try immediately?</p>
-            <p>
-              Demo reader: <span className="font-mono">reader@kitabwanag.org</span>
-            </p>
-            <button
-              type="button"
-              onClick={fillDemoReader}
-              className="text-xs font-semibold text-[#1B4D3E] hover:underline cursor-pointer"
-            >
-              Fill demo reader credentials
-            </button>
-          </div>
-
-          <p className="text-sm text-[#5C615D] text-center">
+        <div className="pt-4 border-t border-[#E5DFD3] space-y-2 text-xs text-[#5C615D]">
+          <p className="leading-relaxed">
             New to KitabWanag?{' '}
-            <Link to="/signup" className="font-semibold text-[#1B4D3E] hover:underline">
-              Create an account
+            <Link to="/signup" state={location.state} className="font-semibold text-[#1B4D3E] hover:underline">
+              Create a reader account
+            </Link>
+          </p>
+          <p className="leading-relaxed">
+            Need help accessing your Google account?{' '}
+            <Link to="/forgot-password" className="font-semibold text-[#1B4D3E] hover:underline">
+              Account recovery options
             </Link>
           </p>
         </div>

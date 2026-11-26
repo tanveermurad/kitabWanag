@@ -213,6 +213,18 @@ export function createApiApp(): express.Express {
     res.json({ ok: true, persistence: dbMode });
   });
 
+  app.post('/api/uploads', uploadImageMiddleware.single('photo'), async (req, res, next) => {
+    try {
+      if (!req.file) {
+        throw new HttpError(400, 'Please attach an image file to upload.');
+      }
+      const imageUrl = await saveBookPhoto(req.file);
+      res.status(201).json({ imageUrl });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // --- Auth Routes ---
   app.post('/api/auth/signup', authRateLimiter, async (req, res, next) => {
     try {

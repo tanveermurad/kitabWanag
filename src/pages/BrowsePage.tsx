@@ -2,6 +2,7 @@ import { Search, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { BookCard } from '../components/BookCard';
+import { useAuth } from '../context/AuthContext';
 import { booksApi, getErrorMessage } from '../lib/api';
 import { BOOK_CATEGORIES, BOOK_LANGUAGES, CITY_PRESETS } from '../lib/cities';
 import type { BookListing } from '../types';
@@ -9,6 +10,7 @@ import type { BookListing } from '../types';
 const FILTER_TABS = ['All', 'Exchange', 'Sell', 'Buy'] as const;
 
 export function BrowsePage() {
+  const { isAuthenticated } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
 
@@ -19,6 +21,7 @@ export function BrowsePage() {
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [books, setBooks] = useState<BookListing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchBooks = useCallback(async () => {
@@ -63,6 +66,26 @@ export function BrowsePage() {
     setSelectedLanguage('All');
     setSearchParams({}, { replace: true });
   };
+
+  const handleSeedBooks = async () => {
+    setSeeding(true);
+    setError(null);
+    try {
+      const seeded = await booksApi.seedStarterLibrary();
+      setBooks(seeded);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Could not load starter books.'));
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const hasActiveFilter =
+    activeType !== 'All' ||
+    Boolean(searchQuery.trim()) ||
+    Boolean(selectedCity) ||
+    selectedCategory !== 'All' ||
+    selectedLanguage !== 'All';
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
@@ -225,19 +248,31 @@ export function BrowsePage() {
             book you are looking for.
           </p>
           <div className="pt-3 flex flex-wrap justify-center gap-3">
-            <button
-              type="button"
-              onClick={resetFilters}
-              className="px-5 py-2.5 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold cursor-pointer"
-            >
-              Reset Filters
-            </button>
+            {hasActiveFilter && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="px-5 py-2.5 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold cursor-pointer"
+              >
+                Reset Filters
+              </button>
+            )}
             <Link
               to="/post"
               className="px-5 py-2.5 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold"
             >
-              Post a Request
+              Post a Book
             </Link>
+            {!hasActiveFilter && isAuthenticated && (
+              <button
+                type="button"
+                disabled={seeding}
+                onClick={() => void handleSeedBooks()}
+                className="px-5 py-2.5 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold hover:bg-[#F3EFE6] disabled:opacity-60 cursor-pointer"
+              >
+                {seeding ? 'Loading sample books...' : 'Load Sample Books'}
+              </button>
+            )}
           </div>
         </div>
       ) : (

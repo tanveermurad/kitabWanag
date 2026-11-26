@@ -114,11 +114,15 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
     setAnswerSubmitting(true);
     setAnswerError(null);
     try {
-      const data = await discussionsApi.addAnswer(questionId, {
+      const data = await discussionsApi.addAnswer(bookId, questionId, {
         body: answerText,
         hasReadBook,
       });
-      setQuestions((prev) => prev.map((q) => (q.id === questionId ? data.question : q)));
+      setQuestions((prev) =>
+        prev.map((q) =>
+          q.id === questionId ? { ...q, answers: [...q.answers, data.answer] } : q,
+        ),
+      );
       setAnsweringId(null);
       setAnswerText('');
     } catch (err) {

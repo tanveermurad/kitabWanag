@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { authApi, booksApi, getErrorMessage, resolveBookImageUrl } from '../lib/api';
+import { CITY_PRESETS } from '../lib/cities';
 import type { BookListing, UserPublic } from '../types';
 
 function formatJoinDate(isoDate: string): string {
@@ -18,10 +19,12 @@ function formatJoinDate(isoDate: string): string {
 }
 
 export function ProfilePage() {
-  const { user: sessionUser } = useAuth();
+  const { user: sessionUser, authReady, isAuthenticated, updateCity } = useAuth();
   const [profile, setProfile] = useState<UserPublic | null>(sessionUser);
   const [books, setBooks] = useState<BookListing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingCity, setSavingCity] = useState(false);
+  const [citySaved, setCitySaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
@@ -40,8 +43,37 @@ export function ProfilePage() {
 
   useEffect(() => {
     document.title = 'My Profile — KitabWanag';
+    if (!authReady || !isAuthenticated || !sessionUser?.id) {
+      return;
+    }
     void loadProfile();
-  }, [loadProfile]);
+
+    const unsub = booksApi.subscribeMine(
+      sessionUser.id,
+      (nextBooks) => {
+        setBooks(nextBooks);
+      },
+      (err) => {
+        setError(getErrorMessage(err, 'Could not sync your book shelf.'));
+      },
+    );
+    return () => unsub();
+  }, [authReady, isAuthenticated, sessionUser?.id, loadProfile]);
+
+  const handleCityChange = async (newCity: string) => {
+    setSavingCity(true);
+    setCitySaved(false);
+    setError(null);
+    try {
+      await updateCity(newCity);
+      setProfile((prev) => (prev ? { ...prev, city: newCity } : prev));
+      setCitySaved(true);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Could not update your city.'));
+    } finally {
+      setSavingCity(false);
+    }
+  };
 
   const counts = useMemo(() => {
     const exchange = books.filter((b) => b.listingType === 'Exchange').length;
@@ -136,9 +168,28 @@ export function ProfilePage() {
 
                 <div className="flex items-start gap-3">
                   <MapPin className="w-4 h-4 text-[#1B4D3E] mt-0.5 shrink-0" aria-hidden="true" />
-                  <div>
-                    <dt className="text-xs text-[#5C615D]">City</dt>
-                    <dd className="font-medium text-[#1C1F1D]">{displayUser?.city || '—'}</dd>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <label htmlFor="profileCitySelect" className="block text-xs text-[#5C615D]">
+                      City
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        id="profileCitySelect"
+                        value={displayUser?.city || 'Quetta'}
+                        disabled={savingCity}
+                        onChange={(e) => void handleCityChange(e.target.value)}
+                        className="h-9 px-2.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm font-medium text-[#1C1F1D] focus:outline-none focus:border-[#1B4D3E]"
+                      >
+                        {CITY_PRESETS.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      {citySaved && (
+                        <span className="text-xs text-[#1B4D3E] font-medium">Saved</span>
+                      )}
+                    </div>
                   </div>
                 </div>
 

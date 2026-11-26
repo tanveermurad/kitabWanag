@@ -1,0 +1,308 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidUserPublic(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'city', 'createdAt'])
+        && data.keys().hasOnly(['id', 'name', 'city', 'createdAt', 'updatedAt'])
+        && data.id is string && isValidId(data.id) && data.id == userId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.city is string && data.city.size() >= 1 && data.city.size() <= 60
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['email', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBook(data) {
+      return data.keys().hasAll([
+          'title', 'author', 'isbn', 'category', 'language', 'listingType',
+          'condition', 'price', 'currency', 'exchangeFor', 'description',
+          'imageUrl', 'city', 'neighborhood', 'lng', 'lat', 'ownerId',
+          'ownerName', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'title', 'author', 'isbn', 'category', 'language', 'listingType',
+          'condition', 'price', 'currency', 'exchangeFor', 'description',
+          'imageUrl', 'city', 'neighborhood', 'lng', 'lat', 'ownerId',
+          'ownerName', 'createdAt', 'updatedAt'
+        ])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.author is string && data.author.size() >= 1 && data.author.size() <= 100
+        && data.isbn is string && data.isbn.size() <= 32
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 60
+        && data.language is string && data.language.size() >= 1 && data.language.size() <= 40
+        && data.listingType in ['Exchange', 'Sell', 'Buy']
+        && data.condition in ['Like New', 'Good', 'Fair', 'Any']
+        && (data.price is int || data.price is float) && data.price >= 0 && data.price <= 1000000
+        && data.currency is string && data.currency == 'PKR'
+        && data.exchangeFor is string && data.exchangeFor.size() <= 160
+        && data.description is string && data.description.size() >= 1 && data.description.size() <= 1500
+        && data.imageUrl is string && data.imageUrl.size() >= 1 && data.imageUrl.size() <= 500
+        && data.city is string && data.city.size() >= 1 && data.city.size() <= 60
+        && data.neighborhood is string && data.neighborhood.size() <= 80
+        && (data.lng is int || data.lng is float) && data.lng >= -180 && data.lng <= 180
+        && (data.lat is int || data.lat is float) && data.lat >= -90 && data.lat <= 90
+        && data.ownerId is string && isValidId(data.ownerId)
+        && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidReview(data, bookId) {
+      return data.keys().hasAll([
+          'bookId', 'authorId', 'authorName', 'authorCity',
+          'rating', 'comment', 'finishedReading', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'bookId', 'authorId', 'authorName', 'authorCity',
+          'rating', 'comment', 'finishedReading', 'createdAt'
+        ])
+        && data.bookId is string && data.bookId == bookId
+        && data.authorId is string && isValidId(data.authorId) && data.authorId == request.auth.uid
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
+        && data.authorCity is string && data.authorCity.size() <= 60
+        && data.rating is int && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() >= 5 && data.comment.size() <= 1000
+        && data.finishedReading is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidQuestion(data, bookId) {
+      return data.keys().hasAll(['bookId', 'authorId', 'authorName', 'question', 'createdAt'])
+        && data.keys().hasOnly(['bookId', 'authorId', 'authorName', 'question', 'createdAt'])
+        && data.bookId is string && data.bookId == bookId
+        && data.authorId is string && isValidId(data.authorId) && data.authorId == request.auth.uid
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
+        && data.question is string && data.question.size() >= 5 && data.question.size() <= 600
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAnswer(data, bookId, questionId) {
+      return data.keys().hasAll([
+          'bookId', 'questionId', 'authorId', 'authorName',
+          'hasReadBook', 'body', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'bookId', 'questionId', 'authorId', 'authorName',
+          'hasReadBook', 'body', 'createdAt'
+        ])
+        && data.bookId is string && data.bookId == bookId
+        && data.questionId is string && data.questionId == questionId
+        && data.authorId is string && isValidId(data.authorId) && data.authorId == request.auth.uid
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
+        && data.hasReadBook is bool
+        && data.body is string && data.body.size() >= 3 && data.body.size() <= 800
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRequest(data) {
+      return data.keys().hasAll([
+          'bookId', 'bookTitle', 'bookType', 'bookImageUrl',
+          'ownerId', 'ownerName', 'requesterId', 'requesterName',
+          'requesterCity', 'offerBookTitle', 'message', 'contactNote',
+          'status', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'bookId', 'bookTitle', 'bookType', 'bookImageUrl',
+          'ownerId', 'ownerName', 'requesterId', 'requesterName',
+          'requesterCity', 'offerBookTitle', 'message', 'contactNote',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.bookId is string && isValidId(data.bookId)
+        && data.bookTitle is string && data.bookTitle.size() >= 1 && data.bookTitle.size() <= 140
+        && data.bookType in ['Exchange', 'Sell', 'Buy']
+        && data.bookImageUrl is string && data.bookImageUrl.size() >= 1 && data.bookImageUrl.size() <= 500
+        && data.ownerId is string && isValidId(data.ownerId)
+        && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80
+        && data.requesterId is string && isValidId(data.requesterId)
+        && data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 80
+        && data.requesterCity is string && data.requesterCity.size() >= 1 && data.requesterCity.size() <= 60
+        && data.offerBookTitle is string && data.offerBookTitle.size() <= 140
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 600
+        && data.contactNote is string && data.contactNote.size() >= 1 && data.contactNote.size() <= 180
+        && data.status in ['Pending', 'Accepted', 'Declined']
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    // Boot connection check document
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Public reader profile (PII-free)
+    match /users/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserPublic(incoming(), userId)
+        && incoming().createdAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserPublic(incoming(), userId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'city', 'updatedAt']);
+
+      // Isolated private PII subcollection
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && docId == 'info' && request.auth.uid == userId;
+        allow list: if false;
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && docId == 'info'
+          && request.auth.uid == userId
+          && isValidUserPrivate(incoming())
+          && incoming().email == request.auth.token.email
+          && incoming().updatedAt == request.time;
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && docId == 'info'
+          && request.auth.uid == userId
+          && isValidUserPrivate(incoming())
+          && incoming().email == request.auth.token.email
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+      }
+    }
+
+    // Community book catalog
+    match /books/{bookId} {
+      allow get: if isValidId(bookId);
+      allow list: if resource.data.listingType in ['Exchange', 'Sell', 'Buy']
+        || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(bookId)
+        && isValidBook(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(bookId)
+        && isValidBook(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'author', 'isbn', 'category', 'language', 'listingType',
+          'condition', 'price', 'exchangeFor', 'description', 'imageUrl',
+          'city', 'neighborhood', 'lng', 'lat', 'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser()
+        && isValidId(bookId)
+        && existing().ownerId == request.auth.uid;
+
+      // Book Reviews subcollection
+      match /reviews/{reviewId} {
+        allow get: if isValidId(bookId) && isValidId(reviewId);
+        allow list: if isValidId(bookId) && resource.data.bookId == bookId;
+        allow create: if isVerifiedUser()
+          && isValidId(bookId)
+          && isValidId(reviewId)
+          && isValidReview(incoming(), bookId)
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/books/$(bookId));
+        allow delete: if isVerifiedUser()
+          && isValidId(bookId)
+          && isValidId(reviewId)
+          && existing().authorId == request.auth.uid;
+      }
+
+      // Book Questions & Answers subcollections
+      match /questions/{questionId} {
+        allow get: if isValidId(bookId) && isValidId(questionId);
+        allow list: if isValidId(bookId) && resource.data.bookId == bookId;
+        allow create: if isVerifiedUser()
+          && isValidId(bookId)
+          && isValidId(questionId)
+          && isValidQuestion(incoming(), bookId)
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/books/$(bookId));
+        allow delete: if isVerifiedUser()
+          && isValidId(bookId)
+          && isValidId(questionId)
+          && existing().authorId == request.auth.uid;
+
+        match /answers/{answerId} {
+          allow get: if isValidId(bookId) && isValidId(questionId) && isValidId(answerId);
+          allow list: if isValidId(bookId) && isValidId(questionId) && resource.data.questionId == questionId;
+          allow create: if isVerifiedUser()
+            && isValidId(bookId)
+            && isValidId(questionId)
+            && isValidId(answerId)
+            && isValidAnswer(incoming(), bookId, questionId)
+            && incoming().createdAt == request.time
+            && exists(/databases/$(database)/documents/books/$(bookId)/questions/$(questionId));
+          allow delete: if isVerifiedUser()
+            && isValidId(bookId)
+            && isValidId(questionId)
+            && isValidId(answerId)
+            && existing().authorId == request.auth.uid;
+        }
+      }
+    }
+
+    // Exchange, Sell, and Buy requests between readers
+    match /requests/{requestId} {
+      allow get: if isSignedIn()
+        && isValidId(requestId)
+        && (existing().ownerId == request.auth.uid || existing().requesterId == request.auth.uid);
+      allow list: if isSignedIn()
+        && (resource.data.ownerId == request.auth.uid || resource.data.requesterId == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidRequest(incoming())
+        && incoming().requesterId == request.auth.uid
+        && incoming().ownerId != request.auth.uid
+        && incoming().status == 'Pending'
+        && incoming().createdAt == request.time
+        && get(/databases/$(database)/documents/books/$(incoming().bookId)).data.ownerId == incoming().ownerId;
+      allow update: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidRequest(incoming())
+        && existing().ownerId == request.auth.uid
+        && existing().status == 'Pending'
+        && incoming().status in ['Accepted', 'Declined']
+        && incoming().ownerId == existing().ownerId
+        && incoming().requesterId == existing().requesterId
+        && incoming().bookId == existing().bookId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+    }
+  }
+}

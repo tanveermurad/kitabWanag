@@ -65,24 +65,66 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong. 
   if (err instanceof ApiError) {
     return err.message;
   }
+
+  const firebaseCode =
+    err && typeof err === 'object' && 'code' in err && typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : '';
+
+  const authCode =
+    firebaseCode.startsWith('auth/')
+      ? firebaseCode
+      : err instanceof Error && err.message.includes('auth/')
+        ? err.message.match(/auth\/[a-z0-9-]+/i)?.[0] || ''
+        : '';
+
+  if (authCode) {
+    switch (authCode) {
+      case 'auth/popup-closed-by-user':
+      case 'auth/cancelled-popup-request':
+        return 'Google sign-in was cancelled before completion. Please try again.';
+      case 'auth/popup-blocked':
+        return 'Your browser blocked the Google sign-in popup. Please allow popups for this site and try again.';
+      case 'auth/unauthorized-domain':
+        return 'This domain is not authorized for Firebase sign-in yet. Add it under Firebase Console → Authentication → Settings → Authorized domains.';
+      case 'auth/operation-not-allowed':
+        return 'Google sign-in is not enabled in Firebase Authentication. Enable the Google provider in Firebase Console.';
+      case 'auth/network-request-failed':
+        return 'Network error while contacting Firebase Authentication. Check your connection and try again.';
+      case 'auth/too-many-requests':
+        return 'Too many sign-in attempts. Please wait a moment and try again.';
+      case 'auth/user-disabled':
+        return 'This Google account has been disabled in Firebase Authentication.';
+      case 'auth/account-exists-with-different-credential':
+        return 'An account already exists with this email using a different sign-in method.';
+      default:
+        break;
+    }
+  }
+
   if (err instanceof Error && err.message) {
+    if (err.message.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(err.message) as { error?: string; operationType?: string };
+        if (parsed.error) {
+          if (parsed.error.includes('Quota exceeded')) {
+            return 'Daily database quota has been reached. Please try again tomorrow or upgrade your Firebase plan.';
+          }
+          if (parsed.error.includes('Missing or insufficient permissions')) {
+            return 'You do not have permission for this action. Please sign in with a verified Google account.';
+          }
+          if (parsed.error.includes('client is offline')) {
+            return 'Unable to reach Firebase Firestore right now. Check your internet connection and try again.';
+          }
+          return parsed.error;
+        }
+      } catch {
+        // Fall through to raw message
+      }
+    }
     return err.message;
   }
   return fallback;
-}
-
-type TokenGetter = () => string | null;
-type UnauthorizedHandler = () => void;
-
-let getAuthToken: TokenGetter = () => null;
-let onUnauthorizedHandler: UnauthorizedHandler | null = null;
-
-export function setAuthTokenProvider(getter: TokenGetter): void {
-  getAuthToken = getter;
-}
-
-export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
-  onUnauthorizedHandler = handler;
 }
 
 function mapStatusToCode(status: number): ApiErrorCode {
@@ -123,14 +165,12 @@ function defaultMessageForStatus(status: number, fallback: string, isHtmlOrNonJs
 
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: BodyInit | Record<string, unknown>;
-  auth?: boolean;
   timeoutMs?: number;
   fallbackMessage?: string;
 }
 
 export async function apiRequest<T>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> {
   const {
-    auth = false,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     fallbackMessage = 'Request failed.',
     headers: rawHeaders,
@@ -155,13 +195,6 @@ export async function apiRequest<T>(endpoint: string, options: ApiRequestOptions
         headers.set('Content-Type', 'application/json');
       }
       body = JSON.stringify(rawBody);
-    }
-  }
-
-  if (auth) {
-    const token = getAuthToken();
-    if (token && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
     }
   }
 
@@ -221,10 +254,6 @@ export async function apiRequest<T>(endpoint: string, options: ApiRequestOptions
     if (res.status >= 502 && res.status <= 504 && attempt < maxAttempts) {
       await new Promise((r) => window.setTimeout(r, 500));
       continue;
-    }
-
-    if (res.status === 401 && onUnauthorizedHandler) {
-      onUnauthorizedHandler();
     }
 
     if (res.status === 204) {

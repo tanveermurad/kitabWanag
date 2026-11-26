@@ -1,71 +1,82 @@
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import {
-  authApi,
-  setAuthTokenProvider,
-  setUnauthorizedHandler,
-} from '../lib/api';
+import { authApi } from '../lib/api';
+import { auth, googleProvider } from '../lib/firebase';
 import type { UserPublic } from '../types';
 
 interface AuthContextValue {
   user: UserPublic | null;
-  token: string | null;
+  authReady: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (name: string, email: string, password: string, city: string) => Promise<void>;
-  logout: () => void;
+  loginWithGoogle: (preferredCity?: string) => Promise<void>;
+  updateCity: (city: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Held strictly in React memory for session security
   const [user, setUser] = useState<UserPublic | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const tokenRef = useRef<string | null>(null);
-
-  const applySession = useCallback((nextToken: string | null, nextUser: UserPublic | null) => {
-    tokenRef.current = nextToken;
-    setToken(nextToken);
-    setUser(nextUser);
-  }, []);
-
-  const logout = useCallback(() => {
-    applySession(null, null);
-  }, [applySession]);
+  const [authReady, setAuthReady] = useState(false);
+  const pendingCityRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    setAuthTokenProvider(() => tokenRef.current);
-    setUnauthorizedHandler(logout);
-    return () => {
-      setAuthTokenProvider(() => null);
-      setUnauthorizedHandler(null);
-    };
-  }, [logout]);
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser) {
+        setUser(null);
+        setAuthReady(true);
+        return;
+      }
+      const chosenCity = pendingCityRef.current;
+      try {
+        const synced = await authApi.syncSignedInUser(fbUser, chosenCity);
+        setUser(synced);
+      } catch (err) {
+        console.error('Failed to sync Firebase user profile:', err);
+        setUser({
+          id: fbUser.uid,
+          name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Reader',
+          email: fbUser.email || '',
+          city: chosenCity || 'Quetta',
+          createdAt: fbUser.metadata.creationTime || new Date().toISOString(),
+        });
+      } finally {
+        setAuthReady(true);
+      }
+    });
 
-  const login = useCallback(
-    async (email: string, password: string) => {
-      const data = await authApi.login(email, password);
-      applySession(data.token, data.user);
-    },
-    [applySession],
-  );
+    return () => unsubscribe();
+  }, []);
 
-  const signup = useCallback(
-    async (name: string, email: string, password: string, city: string) => {
-      const data = await authApi.signup({ name, email, password, city });
-      applySession(data.token, data.user);
-    },
-    [applySession],
-  );
+  const loginWithGoogle = useCallback(async (preferredCity?: string) => {
+    pendingCityRef.current = preferredCity;
+    try {
+      const credential = await signInWithPopup(auth, googleProvider);
+      const synced = await authApi.syncSignedInUser(credential.user, preferredCity);
+      setUser(synced);
+    } finally {
+      pendingCityRef.current = undefined;
+    }
+  }, []);
+
+  const updateCity = useCallback(async (city: string) => {
+    const updated = await authApi.updateCity(city);
+    setUser(updated);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await signOut(auth);
+    setUser(null);
+  }, []);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
-        isAuthenticated: Boolean(user && token),
-        login,
-        signup,
+        authReady,
+        isAuthenticated: Boolean(user && auth.currentUser),
+        loginWithGoogle,
+        updateCity,
         logout,
       }}
     >

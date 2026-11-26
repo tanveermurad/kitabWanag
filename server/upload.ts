@@ -16,12 +16,43 @@ function ensureUploadDir(): void {
   }
 }
 
-function isCloudinaryConfigured(): boolean {
-  return Boolean(
-    process.env.CLOUDINARY_CLOUD_NAME?.trim() &&
-      process.env.CLOUDINARY_API_KEY?.trim() &&
-      process.env.CLOUDINARY_API_SECRET?.trim(),
-  );
+interface CloudinaryCredentials {
+  cloud_name: string;
+  api_key: string;
+  api_secret: string;
+}
+
+function getCloudinaryCredentials(): CloudinaryCredentials | null {
+  const rawUrl = process.env.CLOUDINARY_URL?.trim();
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol === 'cloudinary:') {
+        const cloud_name = parsed.hostname.trim();
+        const api_key = decodeURIComponent(parsed.username).trim();
+        const api_secret = decodeURIComponent(parsed.password).trim();
+        if (
+          cloud_name &&
+          api_key &&
+          api_secret &&
+          !api_key.includes('<') &&
+          !api_secret.includes('<')
+        ) {
+          return { cloud_name, api_key, api_secret };
+        }
+      }
+    } catch {
+      // Ignore malformed CLOUDINARY_URL and check individual env vars
+    }
+  }
+
+  const cloud_name = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+  const api_key = process.env.CLOUDINARY_API_KEY?.trim();
+  const api_secret = process.env.CLOUDINARY_API_SECRET?.trim();
+  if (cloud_name && api_key && api_secret) {
+    return { cloud_name, api_key, api_secret };
+  }
+  return null;
 }
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -76,11 +107,12 @@ export async function saveBookPhoto(file: Express.Multer.File): Promise<string> 
     throw new HttpError(400, 'Invalid image file. Please upload a real JPEG, PNG, or WebP photo.');
   }
 
-  if (isCloudinaryConfigured()) {
+  const creds = getCloudinaryCredentials();
+  if (creds) {
     cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
+      cloud_name: creds.cloud_name,
+      api_key: creds.api_key,
+      api_secret: creds.api_secret,
       secure: true,
     });
 

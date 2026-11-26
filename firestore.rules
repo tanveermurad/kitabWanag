@@ -85,7 +85,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'bookId', 'authorId', 'authorName', 'authorCity',
-          'rating', 'comment', 'finishedReading', 'createdAt'
+          'rating', 'comment', 'finishedReading',
+          'currentPage', 'totalPages', 'createdAt', 'updatedAt'
         ])
         && data.bookId is string && data.bookId == bookId
         && data.authorId is string && isValidId(data.authorId) && data.authorId == request.auth.uid
@@ -94,7 +95,12 @@ service cloud.firestore {
         && data.rating is int && data.rating >= 1 && data.rating <= 5
         && data.comment is string && data.comment.size() >= 5 && data.comment.size() <= 1000
         && data.finishedReading is bool
-        && data.createdAt is timestamp;
+        && (!('currentPage' in data) || (data.currentPage is int && data.currentPage >= 1 && data.currentPage <= 20000))
+        && (!('totalPages' in data) || (data.totalPages is int && data.totalPages >= 1 && data.totalPages <= 20000))
+        && (!('currentPage' in data) || !('totalPages' in data) || data.totalPages >= data.currentPage)
+        && (data.finishedReading == true || ('currentPage' in data))
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     function isValidQuestion(data, bookId) {
@@ -234,8 +240,21 @@ service cloud.firestore {
           && isValidId(bookId)
           && isValidId(reviewId)
           && isValidReview(incoming(), bookId)
+          && !('updatedAt' in incoming())
           && incoming().createdAt == request.time
           && exists(/databases/$(database)/documents/books/$(bookId));
+        allow update: if isVerifiedUser()
+          && isValidId(bookId)
+          && isValidId(reviewId)
+          && isValidReview(incoming(), bookId)
+          && existing().authorId == request.auth.uid
+          && incoming().bookId == existing().bookId
+          && incoming().authorId == existing().authorId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'rating', 'comment', 'finishedReading', 'currentPage', 'totalPages', 'updatedAt'
+          ]);
         allow delete: if isVerifiedUser()
           && isValidId(bookId)
           && isValidId(reviewId)

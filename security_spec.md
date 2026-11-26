@@ -3,7 +3,7 @@
 ## 1. Data Invariants
 1. Public reader profiles (`/users/{userId}`) contain only non-PII display fields (`id`, `name`, `city`, `createdAt`, `updatedAt`); email addresses are isolated in `/users/{userId}/private/info` readable only by the owning user.
 2. A `BookListing` (`/books/{bookId}`) can only be created by a verified user (`email_verified == true`) with `ownerId == request.auth.uid`, valid coordinate bounds, and server-verified `createdAt == request.time`.
-3. A `BookReview` or `BookQuestion` cannot exist without a valid parent `BookListing` verified via `exists(/databases/$(database)/documents/books/$(bookId))`.
+3. A `BookReview` or `BookQuestion` cannot exist without a valid parent `BookListing` verified via `exists(/databases/$(database)/documents/books/$(bookId))`. When `finishedReading == false`, a `BookReview` must include a positive integer `currentPage` (`1..20000`) and any optional `totalPages` must satisfy `totalPages >= currentPage`. Only the review author may update their review's rating, comment, reading status, or page progress.
 4. A `BookAnswer` cannot exist without a valid parent `BookQuestion` verified via `exists(...)`.
 5. A `BookRequest` (`/requests/{requestId}`) can only be read by `ownerId` or `requesterId`, created with `status == 'Pending'` and `ownerId != request.auth.uid` matching the parent book's owner, and transitioned once from `'Pending'` to `'Accepted'` or `'Declined'` solely by `ownerId`.
 
@@ -20,3 +20,4 @@
 10. **Self-request bypass**: Creating `/requests/{reqId}` for one's own book (`ownerId == request.auth.uid`) or mismatched `ownerId`.
 11. **Terminal state reversal**: Updating `/requests/{reqId}` from `'Accepted'` back to `'Pending'` or `'Declined'`.
 12. **ID poisoning**: Creating or reading `/books/bad id with spaces...` failing `isValidId()`.
+13. **Invalid reading progress**: Creating a `/books/{bookId}/reviews/{reviewId}` with `finishedReading: false` without `currentPage`, or with `currentPage > totalPages`, or updating another user's review.

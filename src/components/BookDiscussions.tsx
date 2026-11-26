@@ -20,8 +20,23 @@ function StarDisplay({ rating }: { rating: number }) {
   );
 }
 
+function calcProgressPercent(currentPage?: number, totalPages?: number): number | null {
+  if (!currentPage || !totalPages || totalPages < currentPage || totalPages <= 0) {
+    return null;
+  }
+  return Math.min(100, Math.max(1, Math.round((currentPage / totalPages) * 100)));
+}
+
+function parseOptionalInt(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num);
+}
+
 export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTitle: string }) {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState<'reviews' | 'qa'>('reviews');
 
   const [reviews, setReviews] = useState<BookReview[]>([]);
@@ -34,8 +49,20 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [finishedReading, setFinishedReading] = useState(true);
+  const [currentPageInput, setCurrentPageInput] = useState('');
+  const [totalPagesInput, setTotalPagesInput] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // Inline review progress edit state
+  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
+  const [editRating, setEditRating] = useState(5);
+  const [editComment, setEditComment] = useState('');
+  const [editFinishedReading, setEditFinishedReading] = useState(false);
+  const [editCurrentPage, setEditCurrentPage] = useState('');
+  const [editTotalPages, setEditTotalPages] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Ask question form state
   const [questionText, setQuestionText] = useState('');
@@ -75,10 +102,14 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
     setReviewSubmitting(true);
     setReviewError(null);
     try {
+      const parsedCurrent = parseOptionalInt(currentPageInput);
+      const parsedTotal = parseOptionalInt(totalPagesInput);
       const data = await discussionsApi.addReview(bookId, {
         rating,
         comment,
         finishedReading,
+        ...(finishedReading ? {} : { currentPage: parsedCurrent }),
+        ...(parsedTotal !== null ? { totalPages: parsedTotal } : {}),
       });
       const nextReviews = [data.review, ...reviews];
       setReviews(nextReviews);
@@ -87,10 +118,50 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
       setAverageRating(Number(avg.toFixed(1)));
       setComment('');
       setRating(5);
+      setFinishedReading(true);
+      setCurrentPageInput('');
+      setTotalPagesInput('');
     } catch (err) {
       setReviewError(getErrorMessage(err, 'Failed to submit review.'));
     } finally {
       setReviewSubmitting(false);
+    }
+  };
+
+  const startEditingReview = (rev: BookReview) => {
+    setEditingReviewId(rev.id);
+    setEditRating(rev.rating);
+    setEditComment(rev.comment);
+    setEditFinishedReading(rev.finishedReading);
+    setEditCurrentPage(rev.currentPage ? String(rev.currentPage) : '');
+    setEditTotalPages(rev.totalPages ? String(rev.totalPages) : '');
+    setEditError(null);
+  };
+
+  const handleEditReviewSubmit = async (e: React.FormEvent, reviewId: string) => {
+    e.preventDefault();
+    setEditSubmitting(true);
+    setEditError(null);
+    try {
+      const parsedCurrent = parseOptionalInt(editCurrentPage);
+      const parsedTotal = parseOptionalInt(editTotalPages);
+      const data = await discussionsApi.updateReview(bookId, reviewId, {
+        rating: editRating,
+        comment: editComment,
+        finishedReading: editFinishedReading,
+        ...(editFinishedReading ? {} : { currentPage: parsedCurrent }),
+        ...(parsedTotal !== null ? { totalPages: parsedTotal } : {}),
+      });
+      const nextReviews = reviews.map((r) => (r.id === reviewId ? data.review : r));
+      setReviews(nextReviews);
+      const avg =
+        nextReviews.reduce((sum, r) => sum + r.rating, 0) / Math.max(1, nextReviews.length);
+      setAverageRating(Number(avg.toFixed(1)));
+      setEditingReviewId(null);
+    } catch (err) {
+      setEditError(getErrorMessage(err, 'Failed to update review progress.'));
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -132,6 +203,14 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
     }
   };
 
+  const parsedFormCurrent = parseOptionalInt(currentPageInput);
+  const parsedFormTotal = parseOptionalInt(totalPagesInput);
+  const formPct =
+    !finishedReading && parsedFormCurrent && parsedFormTotal && parsedFormTotal >= parsedFormCurrent
+      ? calcProgressPercent(parsedFormCurrent, parsedFormTotal)
+      : null;
+  const currentlyReadingCount = reviews.filter((r) => !r.finishedReading && r.currentPage).length;
+
   return (
     <section className="mt-14 pt-10 border-t border-[#E5DFD3] space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -140,8 +219,8 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
             Reader reviews &amp; Q&amp;A
           </h2>
           <p className="text-sm text-[#5C615D] mt-1">
-            Read impressions from people who finished {bookTitle}, or ask a question for past readers
-            to answer.
+            Read impressions and current reading progress for {bookTitle}, or ask a question for
+            fellow readers.
           </p>
         </div>
 
@@ -197,18 +276,26 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left: Write a Review */}
           <div className="lg:col-span-5 bg-[#FFFFFF] border border-[#E5DFD3] rounded-xl p-6 space-y-4">
-            <div className="flex items-baseline justify-between pb-3 border-b border-[#E5DFD3]">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-[#E5DFD3]">
               <h3 className="font-display text-xl font-semibold text-[#1C1F1D]">Write a review</h3>
               {reviews.length > 0 && (
-                <span className="text-sm font-semibold text-[#1B4D3E] tabular-nums">
-                  {averageRating} / 5 avg
-                </span>
+                <div className="flex items-center gap-2 text-xs text-[#5C615D] tabular-nums">
+                  <span className="text-sm font-semibold text-[#1B4D3E]">
+                    {averageRating} / 5 avg
+                  </span>
+                  {currentlyReadingCount > 0 && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>{currentlyReadingCount} reading now</span>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 
             {!isAuthenticated ? (
               <div className="space-y-3 text-sm text-[#5C615D]">
-                <p>Sign in to share your rating and review of this book.</p>
+                <p>Sign in to share your rating, reading progress, and review of this book.</p>
                 <Link
                   to="/login"
                   state={{ from: `/books/${bookId}` }}
@@ -219,6 +306,111 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
               </div>
             ) : (
               <form onSubmit={handleReviewSubmit} className="space-y-4">
+                <div>
+                  <span className="block text-sm font-medium text-[#1C1F1D] mb-1.5">
+                    Reading status
+                  </span>
+                  <div className="grid grid-cols-2 gap-1 p-1 bg-[#F3EFE6] border border-[#E5DFD3] rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setFinishedReading(true)}
+                      className={`py-2 px-3 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                        finishedReading
+                          ? 'bg-[#FFFFFF] text-[#1C1F1D] shadow-xs'
+                          : 'text-[#5C615D] hover:text-[#1C1F1D]'
+                      }`}
+                    >
+                      Finished reading
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFinishedReading(false)}
+                      className={`py-2 px-3 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                        !finishedReading
+                          ? 'bg-[#FFFFFF] text-[#1B4D3E] shadow-xs'
+                          : 'text-[#5C615D] hover:text-[#1C1F1D]'
+                      }`}
+                    >
+                      Currently reading
+                    </button>
+                  </div>
+                </div>
+
+                {!finishedReading && (
+                  <div className="space-y-2.5 pt-0.5">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label
+                          htmlFor="reviewCurrentPage"
+                          className="block text-xs font-medium text-[#1C1F1D] mb-1"
+                        >
+                          Current page
+                        </label>
+                        <input
+                          id="reviewCurrentPage"
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={20000}
+                          required={!finishedReading}
+                          value={currentPageInput}
+                          onChange={(e) => setCurrentPageInput(e.target.value)}
+                          placeholder="e.g. 142"
+                          className="w-full h-10 px-3 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm tabular-nums focus:outline-none focus:border-[#1B4D3E]"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="reviewTotalPages"
+                          className="block text-xs font-medium text-[#5C615D] mb-1"
+                        >
+                          Total pages (optional)
+                        </label>
+                        <input
+                          id="reviewTotalPages"
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={20000}
+                          value={totalPagesInput}
+                          onChange={(e) => setTotalPagesInput(e.target.value)}
+                          placeholder="e.g. 320"
+                          className="w-full h-10 px-3 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm tabular-nums focus:outline-none focus:border-[#1B4D3E]"
+                        />
+                      </div>
+                    </div>
+
+                    {parsedFormCurrent !== null && parsedFormCurrent >= 1 && (
+                      <div className="space-y-1.5">
+                        {parsedFormTotal !== null && parsedFormTotal < parsedFormCurrent ? (
+                          <p className="text-xs text-red-700 tabular-nums">
+                            Total pages should be at least {parsedFormCurrent}.
+                          </p>
+                        ) : formPct !== null ? (
+                          <>
+                            <div className="flex items-center justify-between text-xs text-[#5C615D] tabular-nums">
+                              <span>
+                                Page {parsedFormCurrent} of {parsedFormTotal}
+                              </span>
+                              <span className="font-semibold text-[#1B4D3E]">{formPct}%</span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-[#F3EFE6] overflow-hidden">
+                              <div
+                                className="h-full bg-[#1B4D3E] rounded-full transition-all"
+                                style={{ width: `${formPct}%` }}
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-xs text-[#5C615D] tabular-nums">
+                            Sharing progress at page {parsedFormCurrent}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <span className="block text-sm font-medium text-[#1C1F1D] mb-1.5">Rating</span>
                   <div className="flex items-center gap-1.5">
@@ -248,7 +440,7 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
                     htmlFor="reviewComment"
                     className="block text-sm font-medium text-[#1C1F1D] mb-1.5"
                   >
-                    Your thoughts on this book
+                    {finishedReading ? 'Your thoughts on this book' : 'Your thoughts so far'}
                   </label>
                   <textarea
                     id="reviewComment"
@@ -257,20 +449,14 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
                     rows={3}
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
-                    placeholder="What stood out about the writing, depth, or usefulness?"
+                    placeholder={
+                      finishedReading
+                        ? 'What stood out about the writing, depth, or usefulness?'
+                        : 'Share your impressions so far and what keeps you reading...'
+                    }
                     className="w-full p-3 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
                   />
                 </div>
-
-                <label className="flex items-center gap-2.5 text-sm text-[#1C1F1D] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={finishedReading}
-                    onChange={(e) => setFinishedReading(e.target.checked)}
-                    className="w-4 h-4 accent-[#1B4D3E]"
-                  />
-                  <span>I have read this book</span>
-                </label>
 
                 {reviewError && (
                   <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
@@ -283,7 +469,11 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
                   disabled={reviewSubmitting}
                   className="w-full py-2.5 px-4 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-sm font-semibold hover:bg-[#143A2F] disabled:opacity-60 transition-colors cursor-pointer"
                 >
-                  {reviewSubmitting ? 'Publishing...' : 'Publish Review'}
+                  {reviewSubmitting
+                    ? 'Publishing...'
+                    : finishedReading
+                      ? 'Publish Review'
+                      : 'Share Reading Progress'}
                 </button>
               </form>
             )}
@@ -293,37 +483,216 @@ export function BookDiscussions({ bookId, bookTitle }: { bookId: string; bookTit
           <div className="lg:col-span-7 space-y-4">
             {reviews.length === 0 ? (
               <div className="rounded-xl border border-[#E5DFD3] bg-[#FFFFFF] p-8 text-center text-sm text-[#5C615D]">
-                No reviews yet. Readers who have finished this book can share the first review.
+                No reviews yet. Share your thoughts or track your current page on this book.
               </div>
             ) : (
-              reviews.map((rev) => (
-                <article
-                  key={rev.id}
-                  className="rounded-xl border border-[#E5DFD3] bg-[#FFFFFF] p-5 space-y-2.5"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-[#5C615D]">
-                      <strong className="text-sm font-semibold text-[#1C1F1D]">
-                        {rev.authorName}
-                      </strong>
-                      {rev.authorCity && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span>{rev.authorCity}</span>
-                        </>
-                      )}
-                      {rev.finishedReading && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="font-semibold text-[#1B4D3E]">Read this book</span>
-                        </>
-                      )}
+              reviews.map((rev) => {
+                const isOwnReview = Boolean(user && user.id === rev.authorId);
+                const isEditing = editingReviewId === rev.id;
+                const progressPct = calcProgressPercent(rev.currentPage, rev.totalPages);
+
+                return (
+                  <article
+                    key={rev.id}
+                    className="rounded-xl border border-[#E5DFD3] bg-[#FFFFFF] p-5 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[#5C615D]">
+                        <strong className="text-sm font-semibold text-[#1C1F1D]">
+                          {rev.authorName}
+                        </strong>
+                        {rev.authorCity && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{rev.authorCity}</span>
+                          </>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        <span className="font-semibold text-[#1B4D3E]">
+                          {rev.finishedReading ? 'Read this book' : 'Currently reading'}
+                        </span>
+                      </div>
+                      <StarDisplay rating={rev.rating} />
                     </div>
-                    <StarDisplay rating={rev.rating} />
-                  </div>
-                  <p className="text-sm text-[#1C1F1D]/90 leading-relaxed">{rev.comment}</p>
-                </article>
-              ))
+
+                    {!isEditing ? (
+                      <>
+                        {!rev.finishedReading && rev.currentPage && (
+                          <div className="space-y-1.5 pt-0.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#5C615D] tabular-nums">
+                              <span className="font-medium text-[#1C1F1D]">
+                                {rev.totalPages
+                                  ? `Page ${rev.currentPage.toLocaleString()} of ${rev.totalPages.toLocaleString()}`
+                                  : `Currently on page ${rev.currentPage.toLocaleString()}`}
+                              </span>
+                              {progressPct !== null && (
+                                <span className="font-semibold text-[#1B4D3E]">
+                                  {progressPct}% complete
+                                </span>
+                              )}
+                            </div>
+                            {progressPct !== null && (
+                              <div className="h-1.5 w-full rounded-full bg-[#F3EFE6] overflow-hidden">
+                                <div
+                                  className="h-full bg-[#1B4D3E] rounded-full"
+                                  style={{ width: `${progressPct}%` }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <p className="text-sm text-[#1C1F1D]/90 leading-relaxed">{rev.comment}</p>
+
+                        {isOwnReview && (
+                          <div className="pt-2 border-t border-[#E5DFD3]/70 flex items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => startEditingReview(rev)}
+                              className="text-xs font-semibold text-[#1B4D3E] hover:underline cursor-pointer"
+                            >
+                              {rev.finishedReading ? 'Edit review' : 'Update current page'}
+                            </button>
+                            {rev.updatedAt && (
+                              <span className="text-xs text-[#5C615D]">Progress updated</span>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <form
+                        onSubmit={(e) => void handleEditReviewSubmit(e, rev.id)}
+                        className="space-y-3 pt-2 border-t border-[#E5DFD3]/70"
+                      >
+                        <div className="grid grid-cols-2 gap-1 p-1 bg-[#F3EFE6] border border-[#E5DFD3] rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => setEditFinishedReading(false)}
+                            className={`py-1.5 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                              !editFinishedReading
+                                ? 'bg-[#FFFFFF] text-[#1B4D3E] shadow-xs'
+                                : 'text-[#5C615D] hover:text-[#1C1F1D]'
+                            }`}
+                          >
+                            Currently reading
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditFinishedReading(true)}
+                            className={`py-1.5 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                              editFinishedReading
+                                ? 'bg-[#FFFFFF] text-[#1C1F1D] shadow-xs'
+                                : 'text-[#5C615D] hover:text-[#1C1F1D]'
+                            }`}
+                          >
+                            Finished reading
+                          </button>
+                        </div>
+
+                        {!editFinishedReading && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label
+                                htmlFor={`editPage-${rev.id}`}
+                                className="block text-xs font-medium text-[#1C1F1D] mb-1"
+                              >
+                                Current page
+                              </label>
+                              <input
+                                id={`editPage-${rev.id}`}
+                                type="number"
+                                inputMode="numeric"
+                                min={1}
+                                max={20000}
+                                required={!editFinishedReading}
+                                value={editCurrentPage}
+                                onChange={(e) => setEditCurrentPage(e.target.value)}
+                                className="w-full h-9 px-3 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm tabular-nums focus:outline-none focus:border-[#1B4D3E]"
+                              />
+                            </div>
+                            <div>
+                              <label
+                                htmlFor={`editTotal-${rev.id}`}
+                                className="block text-xs font-medium text-[#5C615D] mb-1"
+                              >
+                                Total pages (optional)
+                              </label>
+                              <input
+                                id={`editTotal-${rev.id}`}
+                                type="number"
+                                inputMode="numeric"
+                                min={1}
+                                max={20000}
+                                value={editTotalPages}
+                                onChange={(e) => setEditTotalPages(e.target.value)}
+                                className="w-full h-9 px-3 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm tabular-nums focus:outline-none focus:border-[#1B4D3E]"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              type="button"
+                              onClick={() => setEditRating(star)}
+                              aria-label={`Rate ${star} stars`}
+                              className="p-0.5 cursor-pointer rounded"
+                            >
+                              <Star
+                                className={`w-5 h-5 ${
+                                  star <= editRating
+                                    ? 'fill-[#1B4D3E] text-[#1B4D3E]'
+                                    : 'text-[#D6CFC2]'
+                                }`}
+                              />
+                            </button>
+                          ))}
+                          <span className="ml-2 text-xs text-[#5C615D] tabular-nums">
+                            {editRating} / 5
+                          </span>
+                        </div>
+
+                        <textarea
+                          required
+                          minLength={5}
+                          rows={2}
+                          value={editComment}
+                          onChange={(e) => setEditComment(e.target.value)}
+                          className="w-full p-2.5 rounded-lg bg-[#FAF7F2] border border-[#E5DFD3] text-sm focus:outline-none focus:border-[#1B4D3E]"
+                        />
+
+                        {editError && (
+                          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                            {editError}
+                          </p>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            disabled={editSubmitting}
+                            className="px-4 py-2 rounded-lg bg-[#1B4D3E] text-[#FAF7F2] text-xs font-semibold hover:bg-[#143A2F] disabled:opacity-60 cursor-pointer"
+                          >
+                            {editSubmitting ? 'Saving...' : 'Save Progress'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingReviewId(null);
+                              setEditError(null);
+                            }}
+                            className="px-3 py-2 rounded-lg border border-[#E5DFD3] text-xs text-[#5C615D] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </article>
+                );
+              })
             )}
           </div>
         </div>

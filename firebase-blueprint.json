@@ -291,7 +291,19 @@
         "finishedReading": {
           "type": "boolean"
         },
+        "currentPage": {
+          "type": "integer",
+          "description": "Current page number when the reader is currently reading the book."
+        },
+        "totalPages": {
+          "type": "integer",
+          "description": "Optional total page count of the book edition for progress calculation."
+        },
         "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
           "type": "string",
           "format": "date-time"
         }

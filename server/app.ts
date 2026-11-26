@@ -496,6 +496,31 @@ export function createApiApp(): express.Express {
           throw new HttpError(400, 'Review comment must be at least 5 characters.');
         }
         const finishedReading = Boolean(req.body?.finishedReading);
+        const rawCurrentPage = req.body?.currentPage;
+        const rawTotalPages = req.body?.totalPages;
+        const hasCurrentPage =
+          rawCurrentPage !== undefined && rawCurrentPage !== null && String(rawCurrentPage).trim() !== '';
+        const hasTotalPages =
+          rawTotalPages !== undefined && rawTotalPages !== null && String(rawTotalPages).trim() !== '';
+
+        const totalPages = hasTotalPages ? Math.round(Number(rawTotalPages)) : undefined;
+        if (totalPages !== undefined && (!Number.isInteger(totalPages) || totalPages < 1 || totalPages > 20000)) {
+          throw new HttpError(400, 'Total pages must be a whole number between 1 and 20,000.');
+        }
+
+        let currentPage: number | undefined;
+        if (!finishedReading) {
+          if (!hasCurrentPage) {
+            throw new HttpError(400, 'Please enter your current page when currently reading.');
+          }
+          currentPage = Math.round(Number(rawCurrentPage));
+          if (!Number.isInteger(currentPage) || currentPage < 1 || currentPage > 20000) {
+            throw new HttpError(400, 'Current page must be a whole number between 1 and 20,000.');
+          }
+          if (totalPages !== undefined && currentPage > totalPages) {
+            throw new HttpError(400, 'Current page cannot exceed total pages.');
+          }
+        }
 
         const author = await resolveAuthenticatedActor(req);
 
@@ -507,6 +532,8 @@ export function createApiApp(): express.Express {
           rating: ratingNum,
           comment,
           finishedReading,
+          ...(currentPage !== undefined ? { currentPage } : {}),
+          ...(totalPages !== undefined ? { totalPages } : {}),
         });
 
         res.status(201).json({ review });

@@ -107,6 +107,8 @@ const ReviewSchema = new Schema(
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, required: true },
     finishedReading: { type: Boolean, default: true },
+    currentPage: { type: Number, default: undefined },
+    totalPages: { type: Number, default: undefined },
   },
   { timestamps: true },
 );
@@ -593,6 +595,12 @@ function toBookRequest(r: any): BookRequest {
 }
 
 function toBookReview(r: any): BookReview {
+  const currentPage = Number.isInteger(Number(r.currentPage)) && Number(r.currentPage) >= 1
+    ? Number(r.currentPage)
+    : undefined;
+  const totalPages = Number.isInteger(Number(r.totalPages)) && Number(r.totalPages) >= 1
+    ? Number(r.totalPages)
+    : undefined;
   return {
     id: String(r._id ?? r.id),
     bookId: String(r.bookId),
@@ -602,7 +610,10 @@ function toBookReview(r: any): BookReview {
     rating: Number(r.rating),
     comment: r.comment,
     finishedReading: Boolean(r.finishedReading),
+    ...(currentPage !== undefined ? { currentPage } : {}),
+    ...(totalPages !== undefined ? { totalPages } : {}),
     createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+    ...(r.updatedAt ? { updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : String(r.updatedAt) } : {}),
   };
 }
 
@@ -1225,6 +1236,8 @@ export async function createBookReview(input: {
   rating: number;
   comment: string;
   finishedReading: boolean;
+  currentPage?: number;
+  totalPages?: number;
 }): Promise<BookReview> {
   if (usingMongo) {
     const doc = await ReviewModel.create(input);

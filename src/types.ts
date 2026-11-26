@@ -68,7 +68,10 @@ export interface BookReview {
   rating: number;
   comment: string;
   finishedReading: boolean;
+  currentPage?: number;
+  totalPages?: number;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface BookAnswer {

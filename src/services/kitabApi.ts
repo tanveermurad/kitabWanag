@@ -1,6 +1,7 @@
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -934,6 +935,70 @@ export const requestsApi = {
   },
 };
 
+function docToReview(id: string, fallbackBookId: string, data: Record<string, unknown>): BookReview {
+  const rawCurrent = Number(data.currentPage);
+  const rawTotal = Number(data.totalPages);
+  const currentPage =
+    Number.isInteger(rawCurrent) && rawCurrent >= 1 && rawCurrent <= 20000 ? rawCurrent : undefined;
+  const totalPages =
+    Number.isInteger(rawTotal) && rawTotal >= 1 && rawTotal <= 20000 ? rawTotal : undefined;
+
+  return {
+    id,
+    bookId: String(data.bookId || fallbackBookId),
+    authorId: String(data.authorId || ''),
+    authorName: String(data.authorName || ''),
+    authorCity: String(data.authorCity || ''),
+    rating: Number(data.rating ?? 5),
+    comment: String(data.comment || ''),
+    finishedReading: Boolean(data.finishedReading),
+    ...(currentPage !== undefined ? { currentPage } : {}),
+    ...(totalPages !== undefined ? { totalPages } : {}),
+    createdAt: tsToIso(data.createdAt),
+    ...(data.updatedAt ? { updatedAt: tsToIso(data.updatedAt) } : {}),
+  };
+}
+
+function parseReviewProgress(payload: {
+  finishedReading: boolean;
+  currentPage?: number | null;
+  totalPages?: number | null;
+}): { finishedReading: boolean; currentPage?: number; totalPages?: number } {
+  const finishedReading = Boolean(payload.finishedReading);
+  const hasCurrentPage =
+    payload.currentPage !== undefined &&
+    payload.currentPage !== null &&
+    String(payload.currentPage).trim() !== '';
+  const hasTotalPages =
+    payload.totalPages !== undefined &&
+    payload.totalPages !== null &&
+    String(payload.totalPages).trim() !== '';
+
+  const totalPages = hasTotalPages ? Math.round(Number(payload.totalPages)) : undefined;
+  if (totalPages !== undefined && (!Number.isInteger(totalPages) || totalPages < 1 || totalPages > 20000)) {
+    throw new Error('Total pages must be a whole number between 1 and 20,000.');
+  }
+
+  if (finishedReading) {
+    return totalPages !== undefined ? { finishedReading: true, totalPages } : { finishedReading: true };
+  }
+
+  if (!hasCurrentPage) {
+    throw new Error('Please enter your current page when currently reading.');
+  }
+  const currentPage = Math.round(Number(payload.currentPage));
+  if (!Number.isInteger(currentPage) || currentPage < 1 || currentPage > 20000) {
+    throw new Error('Current page must be a whole number between 1 and 20,000.');
+  }
+  if (totalPages !== undefined && currentPage > totalPages) {
+    throw new Error('Current page cannot exceed total pages.');
+  }
+
+  return totalPages !== undefined
+    ? { finishedReading: false, currentPage, totalPages }
+    : { finishedReading: false, currentPage };
+}
+
 export const discussionsApi = {
   async getByBookId(bookId: string): Promise<BookDiscussionsResponse> {
     const safeBookId = assertValidId(bookId, 'book ID');
@@ -952,21 +1017,12 @@ export const discussionsApi = {
     }
 
     const reviews: BookReview[] = revSnap.docs
-      .map((d) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          id: d.id,
-          bookId: String(data.bookId || safeBookId),
-          authorId: String(data.authorId || ''),
-          authorName: String(data.authorName || ''),
-          authorCity: String(data.authorCity || ''),
-          rating: Number(data.rating ?? 5),
-          comment: String(data.comment || ''),
-          finishedReading: Boolean(data.finishedReading),
-          createdAt: tsToIso(data.createdAt),
-        };
-      })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .map((d) => docToReview(d.id, safeBookId, d.data() as Record<string, unknown>))
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt).getTime() -
+          new Date(a.updatedAt || a.createdAt).getTime(),
+      );
 
     const questions: BookQuestion[] = await Promise.all(
       qSnap.docs.map(async (qDoc) => {
@@ -1023,7 +1079,13 @@ export const discussionsApi = {
 
   async addReview(
     bookId: string,
-    payload: { rating: number; comment: string; finishedReading: boolean },
+    payload: {
+      rating: number;
+      comment: string;
+      finishedReading: boolean;
+      currentPage?: number | null;
+      totalPages?: number | null;
+    },
   ): Promise<{ review: BookReview }> {
     const current = requireVerifiedAuth();
     const uid = assertValidId(current.uid, 'user ID');
@@ -1036,22 +1098,31 @@ export const discussionsApi = {
     if (comment.length < 5) {
       throw new Error('Review comment must be at least 5 characters.');
     }
+    const progress = parseReviewProgress(payload);
 
     const author = await authApi.syncSignedInUser(current);
     const reviewId = makeId('rev');
     const path = `books/${safeBookId}/reviews/${reviewId}`;
 
+    const reviewDoc: Record<string, unknown> = {
+      bookId: safeBookId,
+      authorId: uid,
+      authorName: clampText(author.name, 80, 'Reader'),
+      authorCity: clampText(author.city, 60, ''),
+      rating,
+      comment,
+      finishedReading: progress.finishedReading,
+      createdAt: serverTimestamp(),
+    };
+    if (progress.currentPage !== undefined) {
+      reviewDoc.currentPage = progress.currentPage;
+    }
+    if (progress.totalPages !== undefined) {
+      reviewDoc.totalPages = progress.totalPages;
+    }
+
     try {
-      await setDoc(doc(db, 'books', safeBookId, 'reviews', reviewId), {
-        bookId: safeBookId,
-        authorId: uid,
-        authorName: clampText(author.name, 80, 'Reader'),
-        authorCity: clampText(author.city, 60, ''),
-        rating,
-        comment,
-        finishedReading: Boolean(payload.finishedReading),
-        createdAt: serverTimestamp(),
-      });
+      await setDoc(doc(db, 'books', safeBookId, 'reviews', reviewId), reviewDoc);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, path);
     }
@@ -1065,9 +1136,62 @@ export const discussionsApi = {
         authorCity: clampText(author.city, 60, ''),
         rating,
         comment,
-        finishedReading: Boolean(payload.finishedReading),
+        finishedReading: progress.finishedReading,
+        ...(progress.currentPage !== undefined ? { currentPage: progress.currentPage } : {}),
+        ...(progress.totalPages !== undefined ? { totalPages: progress.totalPages } : {}),
         createdAt: new Date().toISOString(),
       },
+    };
+  },
+
+  async updateReview(
+    bookId: string,
+    reviewId: string,
+    payload: {
+      rating: number;
+      comment: string;
+      finishedReading: boolean;
+      currentPage?: number | null;
+      totalPages?: number | null;
+    },
+  ): Promise<{ review: BookReview }> {
+    requireVerifiedAuth();
+    const safeBookId = assertValidId(bookId, 'book ID');
+    const safeReviewId = assertValidId(reviewId, 'review ID');
+    const rating = Math.round(Number(payload.rating));
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new Error('Please choose a rating between 1 and 5 stars.');
+    }
+    const comment = clampText(payload.comment, 1000);
+    if (comment.length < 5) {
+      throw new Error('Review comment must be at least 5 characters.');
+    }
+    const progress = parseReviewProgress(payload);
+    const path = `books/${safeBookId}/reviews/${safeReviewId}`;
+    const ref = doc(db, 'books', safeBookId, 'reviews', safeReviewId);
+
+    try {
+      await updateDoc(ref, {
+        rating,
+        comment,
+        finishedReading: progress.finishedReading,
+        currentPage: progress.currentPage !== undefined ? progress.currentPage : deleteField(),
+        totalPages: progress.totalPages !== undefined ? progress.totalPages : deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, path);
+    }
+
+    return {
+      review: docToReview(snap.id, safeBookId, (snap.data() || {}) as Record<string, unknown>),
     };
   },
 
@@ -1181,21 +1305,12 @@ export const discussionsApi = {
         }
 
         reviewsByBook[safeBookId] = revSnap.docs
-          .map((d) => {
-            const data = d.data() as Record<string, unknown>;
-            return {
-              id: d.id,
-              bookId: String(data.bookId || safeBookId),
-              authorId: String(data.authorId || ''),
-              authorName: String(data.authorName || ''),
-              authorCity: String(data.authorCity || ''),
-              rating: Number(data.rating ?? 5),
-              comment: String(data.comment || ''),
-              finishedReading: Boolean(data.finishedReading),
-              createdAt: tsToIso(data.createdAt),
-            };
-          })
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          .map((d) => docToReview(d.id, safeBookId, d.data() as Record<string, unknown>))
+          .sort(
+            (a, b) =>
+              new Date(b.updatedAt || b.createdAt).getTime() -
+              new Date(a.updatedAt || a.createdAt).getTime(),
+          );
 
         questionsByBook[safeBookId] = qSnap.docs
           .map((d) => {

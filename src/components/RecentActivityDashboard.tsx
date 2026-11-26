@@ -180,13 +180,17 @@ export function RecentActivityDashboard({
             if (rev.authorId !== user.id) {
               bookHasExternalUpdate = true;
               updatesOnReviewed += 1;
+              const pageSuffix =
+                !rev.finishedReading && rev.currentPage
+                  ? ` · Reading p. ${rev.currentPage}${rev.totalPages ? `/${rev.totalPages}` : ''}`
+                  : '';
               entries.push({
                 id: `rev-peer-${rev.id}`,
                 category: 'reviewed',
-                kicker: `New review on a book you reviewed · ${rev.rating}/5 stars`,
+                kicker: `New review on a book you reviewed · ${rev.rating}/5 stars${pageSuffix}`,
                 title: book.title,
                 detail: `${rev.authorName}: "${rev.comment}"`,
-                timestamp: rev.createdAt,
+                timestamp: rev.updatedAt || rev.createdAt,
                 to: `/books/${book.id}`,
                 imageUrl: book.imageUrl,
               });
@@ -211,13 +215,17 @@ export function RecentActivityDashboard({
           }
 
           if (!bookHasExternalUpdate) {
+            const myPageSuffix =
+              !myReview.finishedReading && myReview.currentPage
+                ? ` · Page ${myReview.currentPage}${myReview.totalPages ? `/${myReview.totalPages}` : ''}`
+                : '';
             entries.push({
               id: `rev-self-${myReview.id}`,
               category: 'reviewed',
-              kicker: `Your review · ${myReview.rating}/5 stars · ${book.city}`,
+              kicker: `${myReview.finishedReading ? 'Your review' : 'Currently reading'} · ${myReview.rating}/5 stars${myPageSuffix} · ${book.city}`,
               title: book.title,
               detail: `"${myReview.comment}"`,
-              timestamp: myReview.createdAt,
+              timestamp: myReview.updatedAt || myReview.createdAt,
               to: `/books/${book.id}`,
               imageUrl: book.imageUrl,
             });
@@ -231,13 +239,17 @@ export function RecentActivityDashboard({
         const revs = reviewsByBook[book.id] || [];
         const qs = questionsByBook[book.id] || [];
         for (const rev of revs.slice(0, 2)) {
+          const pageLabel =
+            !rev.finishedReading && rev.currentPage
+              ? `Currently reading (p. ${rev.currentPage}${rev.totalPages ? `/${rev.totalPages}` : ''})`
+              : 'Reader review';
           entries.push({
             id: `comm-rev-${rev.id}`,
             category: 'reviewed',
-            kicker: `Reader review · ${rev.rating}/5 stars · ${book.city}`,
+            kicker: `${pageLabel} · ${rev.rating}/5 stars · ${book.city}`,
             title: book.title,
             detail: `${rev.authorName}: "${rev.comment}"`,
-            timestamp: rev.createdAt,
+            timestamp: rev.updatedAt || rev.createdAt,
             to: `/books/${book.id}`,
             imageUrl: book.imageUrl,
           });

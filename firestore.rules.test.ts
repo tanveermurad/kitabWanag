@@ -76,4 +76,16 @@ export const DIRTY_DOZEN_CASES = [
     operation: 'create',
     expected: 'PERMISSION_DENIED',
   },
+  {
+    name: 'Currently-reading review without valid currentPage or with currentPage > totalPages blocked',
+    path: 'books/bk_101/reviews/rev_bad_page',
+    operation: 'create',
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: 'Non-author review progress update blocked',
+    path: 'books/bk_101/reviews/rev_301',
+    operation: 'update',
+    expected: 'PERMISSION_DENIED',
+  },
 ] as const;

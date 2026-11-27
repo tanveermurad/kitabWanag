@@ -33,7 +33,13 @@ import {
   requireVerifiedAuth,
   sanitizeString,
 } from './middleware.ts';
-import { saveBookPhoto, UPLOAD_DIR, uploadImageMiddleware, validatePresetImageUrl } from './upload.ts';
+import {
+  getStorageProviderStatus,
+  saveBookPhoto,
+  UPLOAD_DIR,
+  uploadImageMiddleware,
+  validatePresetImageUrl,
+} from './upload.ts';
 
 const VALID_TYPES = new Set<ListingType>(['Exchange', 'Sell', 'Buy']);
 const VALID_CONDITIONS = new Set<BookCondition>(['Like New', 'Good', 'Fair', 'Any']);
@@ -139,7 +145,12 @@ export function createApiApp(): express.Express {
 
   // Health
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, persistence: dbMode, authProvider: 'firebase' });
+    res.json({
+      ok: true,
+      persistence: dbMode,
+      authProvider: 'firebase',
+      storage: getStorageProviderStatus(),
+    });
   });
 
   // Authenticated photo upload backed by Firebase ID token verification

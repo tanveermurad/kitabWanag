@@ -15,17 +15,20 @@ function ensureUploadDir(): void {
   }
 }
 
+interface SupabaseStorageCredentials {
+  url: string;
+  serviceRoleKey: string;
+  bucket: string;
+}
+
 interface CloudinaryCredentials {
   cloud_name: string;
   api_key: string;
   api_secret: string;
 }
 
-function normalizeCloudinaryUrl(raw: string): string {
+function normalizeEnvValue(raw: string): string {
   let value = raw.trim();
-  if (value.toUpperCase().startsWith('CLOUDINARY_URL=')) {
-    value = value.slice('CLOUDINARY_URL='.length).trim();
-  }
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
@@ -33,6 +36,59 @@ function normalizeCloudinaryUrl(raw: string): string {
     value = value.slice(1, -1).trim();
   }
   return value;
+}
+
+function getSupabaseStorageCredentials(): SupabaseStorageCredentials | null {
+  const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const rawKey =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    '';
+
+  const urlText = normalizeEnvValue(rawUrl).replace(/\/+$/, '');
+  const serviceRoleKey = normalizeEnvValue(rawKey);
+  if (
+    !urlText ||
+    !serviceRoleKey ||
+    urlText.includes('<') ||
+    serviceRoleKey.includes('<')
+  ) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(urlText);
+    const isLocalHttp =
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+    if (parsed.protocol !== 'https:' && !isLocalHttp) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const rawBucket = normalizeEnvValue(
+    process.env.SUPABASE_STORAGE_BUCKET ||
+      process.env.VITE_SUPABASE_STORAGE_BUCKET ||
+      'book-covers',
+  );
+  const bucket = /^[a-zA-Z0-9._-]{1,64}$/.test(rawBucket) ? rawBucket : 'book-covers';
+
+  return {
+    url: urlText,
+    serviceRoleKey,
+    bucket,
+  };
+}
+
+function normalizeCloudinaryUrl(raw: string): string {
+  let value = raw.trim();
+  if (value.toUpperCase().startsWith('CLOUDINARY_URL=')) {
+    value = value.slice('CLOUDINARY_URL='.length).trim();
+  }
+  return normalizeEnvValue(value);
 }
 
 function getCloudinaryCredentials(): CloudinaryCredentials | null {
@@ -67,6 +123,13 @@ function getCloudinaryCredentials(): CloudinaryCredentials | null {
     return { cloud_name, api_key, api_secret };
   }
   return null;
+}
+
+export function getStorageProviderStatus(): 'supabase' | 'cloudinary' | 'local' | 'unconfigured' {
+  if (getSupabaseStorageCredentials()) return 'supabase';
+  if (getCloudinaryCredentials()) return 'cloudinary';
+  if (IS_SERVERLESS) return 'unconfigured';
+  return 'local';
 }
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -121,23 +184,115 @@ function detectImageExtension(buffer: Buffer): 'jpg' | 'png' | 'webp' | null {
   return null;
 }
 
+function contentTypeForExtension(ext: 'jpg' | 'png' | 'webp'): string {
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/jpeg';
+}
+
+async function readSupabaseErrorMessage(res: Response): Promise<string> {
+  try {
+    const text = await res.text();
+    if (!text) return `HTTP ${res.status}`;
+    const parsed = JSON.parse(text) as { message?: string; error?: string; statusCode?: string };
+    return parsed.message || parsed.error || text;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
+
+async function ensureSupabasePublicBucket(creds: SupabaseStorageCredentials): Promise<void> {
+  const createRes = await fetch(`${creds.url}/storage/v1/bucket`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${creds.serviceRoleKey}`,
+      apikey: creds.serviceRoleKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id: creds.bucket,
+      name: creds.bucket,
+      public: true,
+      file_size_limit: 4 * 1024 * 1024,
+      allowed_mime_types: ['image/jpeg', 'image/png', 'image/webp'],
+    }),
+  });
+
+  if (!createRes.ok && createRes.status !== 409) {
+    const detail = await readSupabaseErrorMessage(createRes);
+    throw new HttpError(
+      502,
+      `Could not prepare Supabase Storage bucket "${creds.bucket}" (${detail}).`,
+    );
+  }
+}
+
+async function uploadToSupabaseStorage(
+  creds: SupabaseStorageCredentials,
+  buffer: Buffer,
+  ext: 'jpg' | 'png' | 'webp',
+): Promise<string> {
+  const objectPath = `covers/${crypto.randomUUID()}.${ext}`;
+  const uploadUrl = `${creds.url}/storage/v1/object/${encodeURIComponent(creds.bucket)}/${objectPath}`;
+  const contentType = contentTypeForExtension(ext);
+
+  const doUpload = () =>
+    fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${creds.serviceRoleKey}`,
+        apikey: creds.serviceRoleKey,
+        'Content-Type': contentType,
+        'x-upsert': 'false',
+      },
+      body: new Uint8Array(buffer),
+    });
+
+  let res = await doUpload();
+  if (!res.ok) {
+    const detail = await readSupabaseErrorMessage(res);
+    const missingBucket =
+      res.status === 404 ||
+      /bucket not found/i.test(detail) ||
+      /not_found/i.test(detail);
+
+    if (missingBucket) {
+      await ensureSupabasePublicBucket(creds);
+      res = await doUpload();
+      if (!res.ok) {
+        const retryDetail = await readSupabaseErrorMessage(res);
+        throw new HttpError(502, `Failed to upload image to Supabase Storage (${retryDetail}).`);
+      }
+    } else {
+      throw new HttpError(502, `Failed to upload image to Supabase Storage (${detail}).`);
+    }
+  }
+
+  return `${creds.url}/storage/v1/object/public/${encodeURIComponent(creds.bucket)}/${objectPath}`;
+}
+
 export async function saveBookPhoto(file: Express.Multer.File): Promise<string> {
   const ext = detectImageExtension(file.buffer);
   if (!ext) {
     throw new HttpError(400, 'Invalid image file. Please upload a real JPEG, PNG, or WebP photo.');
   }
 
-  const creds = getCloudinaryCredentials();
-  if (creds) {
+  const supabaseCreds = getSupabaseStorageCredentials();
+  if (supabaseCreds) {
+    return await uploadToSupabaseStorage(supabaseCreds, file.buffer, ext);
+  }
+
+  const cloudinaryCreds = getCloudinaryCredentials();
+  if (cloudinaryCreds) {
     const savedCloudinaryUrl = process.env.CLOUDINARY_URL;
     delete process.env.CLOUDINARY_URL;
     let cloudinary: typeof import('cloudinary').v2;
     try {
       ({ v2: cloudinary } = await import('cloudinary'));
       cloudinary.config({
-        cloud_name: creds.cloud_name,
-        api_key: creds.api_key,
-        api_secret: creds.api_secret,
+        cloud_name: cloudinaryCreds.cloud_name,
+        api_key: cloudinaryCreds.api_key,
+        api_secret: cloudinaryCreds.api_secret,
         secure: true,
       });
     } finally {
@@ -166,7 +321,7 @@ export async function saveBookPhoto(file: Express.Multer.File): Promise<string> 
   if (IS_SERVERLESS) {
     throw new HttpError(
       503,
-      'Photo upload requires a valid CLOUDINARY_URL in environment variables. Please choose an editorial cover or paste an HTTPS cover image URL.',
+      'Photo storage is not configured yet. Add SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) in Environment Variables / Secrets, or paste an HTTPS cover image URL.',
     );
   }
 

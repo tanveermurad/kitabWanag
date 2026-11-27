@@ -1,6 +1,7 @@
-import { BookOpen, LocateFixed, Upload } from 'lucide-react';
+import { LocateFixed } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { BookPhotoDropzone } from '../components/BookPhotoDropzone';
 import { LeafletMap } from '../components/LeafletMap';
 import { useAuth } from '../context/AuthContext';
 import { booksApi, getErrorMessage, resolveBookImageUrl } from '../lib/api';
@@ -113,29 +114,17 @@ export function PostBookPage() {
     };
   }, [previewUrl]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    const allowedMime = new Set(['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp']);
-    const mimeOk = file.type ? allowedMime.has(file.type.toLowerCase()) : /\.(jpe?g|png|webp)$/i.test(file.name);
-    if (!mimeOk) {
-      const msg = 'Please choose a JPEG, PNG, or WebP photo.';
-      setPhotoError(msg);
-      setError(msg);
-      return;
-    }
-    if (file.size > 4 * 1024 * 1024) {
-      const msg = 'Photo must be 4 MB or smaller.';
-      setPhotoError(msg);
-      setError(msg);
-      return;
-    }
+  const handlePhotoSelect = (file: File | null) => {
     setError(null);
     setPhotoError(null);
+    setPreviewFailed(false);
+    if (!file) {
+      setSelectedFile(null);
+      setPreviewUrl(customImageUrl.trim() || presetImageUrl);
+      return;
+    }
     setSelectedFile(file);
     setCustomImageUrl('');
-    setPreviewFailed(false);
     const objectUrl = URL.createObjectURL(file);
     setPreviewUrl(objectUrl);
   };
@@ -211,7 +200,11 @@ export function PostBookPage() {
       const data = isEditing && id ? await booksApi.update(id, formData) : await booksApi.create(formData);
       navigate(`/books/${data.book.id}`);
     } catch (err) {
-      setError(getErrorMessage(err, 'Unable to save book listing.'));
+      const msg = getErrorMessage(err, 'Unable to save book listing.');
+      setError(msg);
+      if (selectedFile && /photo|upload|supabase|cloudinary|storage|image/i.test(msg)) {
+        setPhotoError(msg);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -239,56 +232,15 @@ export function PostBookPage() {
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left: Photo & Preview */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="aspect-[3/4] rounded-xl overflow-hidden border border-[#E5DFD3] bg-[#F3EFE6]">
-            {!previewFailed && previewUrl ? (
-              <img
-                src={previewUrl}
-                alt="Book cover preview"
-                referrerPolicy="no-referrer"
-                onError={() => setPreviewFailed(true)}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-[#5C615D]">
-                <BookOpen className="w-10 h-10 text-[#1B4D3E]/70 mb-2" />
-                <p className="text-xs font-medium">
-                  Cover preview unavailable. Select an editorial cover or paste a valid HTTPS image URL.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <label className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-lg border border-[#1B4D3E] text-[#1B4D3E] text-sm font-semibold hover:bg-[#F3EFE6] transition-colors cursor-pointer">
-              <Upload className="w-4 h-4" />
-              {selectedFile ? 'Change uploaded photo' : 'Upload book photo'}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={handleFileChange}
-                className="sr-only"
-              />
-            </label>
-            {selectedFile && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedFile(null);
-                  setPhotoError(null);
-                  setPreviewFailed(false);
-                  setPreviewUrl(customImageUrl.trim() || presetImageUrl);
-                }}
-                className="w-full py-1.5 text-xs font-medium text-[#5C615D] hover:text-[#1C1F1D] cursor-pointer"
-              >
-                Clear selected photo ({selectedFile.name})
-              </button>
-            )}
-            {photoError && (
-              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                {photoError}
-              </p>
-            )}
-          </div>
+          <BookPhotoDropzone
+            previewUrl={previewUrl}
+            previewFailed={previewFailed}
+            onPreviewError={() => setPreviewFailed(true)}
+            selectedFile={selectedFile}
+            onFileSelect={handlePhotoSelect}
+            error={photoError}
+            onError={setPhotoError}
+          />
 
           <div className="space-y-2">
             <p className="text-xs font-medium text-[#5C615D]">Or select an editorial cover:</p>
@@ -299,6 +251,7 @@ export function PostBookPage() {
                   type="button"
                   onClick={() => {
                     setSelectedFile(null);
+                    setPhotoError(null);
                     setCustomImageUrl('');
                     setPresetImageUrl(preset.url);
                     setPreviewFailed(false);
@@ -325,7 +278,7 @@ export function PostBookPage() {
               type="url"
               value={customImageUrl}
               onChange={(e) => handleCustomUrlChange(e.target.value)}
-              placeholder="https://res.cloudinary.com/..."
+              placeholder="https://..."
               className="w-full h-10 px-3 rounded-lg bg-[#FFFFFF] border border-[#E5DFD3] text-xs focus:outline-none focus:border-[#1B4D3E]"
             />
           </div>

@@ -16,6 +16,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { uploadBookCoverToSupabase } from '../lib/supabase';
 import { findCityPreset } from '../lib/cities';
 import type {
   BookAnswer,
@@ -175,6 +176,7 @@ async function resolveCoverImageUrl(formData: FormData): Promise<string> {
         method: 'POST',
         body: uploadFd,
         auth: true,
+        timeoutMs: 45000,
         fallbackMessage: 'Could not upload cover photo.',
       });
       if (uploaded.imageUrl) {
@@ -186,11 +188,20 @@ async function resolveCoverImageUrl(formData: FormData): Promise<string> {
         (err.status === 404 ||
           err.status === 405 ||
           err.code === 'NETWORK_ERROR' ||
-          err.code === 'TIMEOUT' ||
           err.code === 'INVALID_RESPONSE')
       ) {
+        const directUrl = await uploadBookCoverToSupabase(file);
+        if (directUrl) {
+          return clampText(directUrl, 500, '/src/assets/images/book_literary_classic_1795631935232.jpg');
+        }
+        const detail = `${err.code}${err.status ? ` HTTP ${err.status}` : ''}`;
+        if (err.code === 'INVALID_RESPONSE') {
+          throw new Error(
+            `This preview URL is serving static HTML instead of the /api/uploads backend (${detail}). Upload from the Development App URL, redeploy the updated API on Vercel, or set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (with a public upload policy) for static hosting—or paste an HTTPS cover image URL.`,
+          );
+        }
         throw new Error(
-          'Photo upload server is unavailable here. Please select one of the editorial book covers or paste a cover image URL.',
+          `Photo upload endpoint is unreachable here (${detail}). Ensure the backend server is running with SUPABASE_URL and SUPABASE_SECRET_KEY in Secrets / Environment Variables, or paste an HTTPS cover image URL.`,
         );
       }
       throw err;

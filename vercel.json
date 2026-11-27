@@ -1,6 +1,12 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/**/*.ts": {
+      "includeFiles": "firebase-applet-config.json",
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index?__path=$1" },
     { "source": "/((?!api(?:/|$)|src/assets/|assets/).*)", "destination": "/index.html" }

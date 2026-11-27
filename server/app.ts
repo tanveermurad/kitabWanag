@@ -132,8 +132,12 @@ export function createApiApp(): express.Express {
 
   let dbMode: 'mongodb' | 'local' = 'local';
 
-  // Ensure database is initialized once per process / serverless cold start
-  app.use('/api', async (_req, _res, next) => {
+  // Ensure database is initialized once per process / serverless cold start (skip for health & uploads)
+  app.use('/api', async (req, _res, next) => {
+    if (req.path === '/health' || req.path === '/uploads') {
+      next();
+      return;
+    }
     try {
       const result = await initDatabase();
       dbMode = result.mode;

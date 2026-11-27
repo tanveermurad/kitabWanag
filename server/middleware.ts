@@ -6,15 +6,15 @@ import { getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 
 function resolveFirebaseProjectId(): string {
-  const fromEnv = process.env.FIREBASE_PROJECT_ID?.trim();
+  const fromEnv = (process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID)?.trim();
   if (fromEnv && fromEnv !== 'remixed-project-id') {
     return fromEnv;
   }
 
-  const candidates = [
-    path.resolve(process.cwd(), 'firebase-applet-config.json'),
-    path.resolve(import.meta.dirname, '..', 'firebase-applet-config.json'),
-  ];
+  const candidates = [path.resolve(process.cwd(), 'firebase-applet-config.json')];
+  if (typeof __dirname === 'string') {
+    candidates.push(path.resolve(__dirname, '..', 'firebase-applet-config.json'));
+  }
 
   for (const configPath of candidates) {
     try {
